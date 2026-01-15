@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: armoire-app
+    ports:
+      - "80:8000"
+    volumes:
+      - ./data:/data
+    env_file:
+      - .env
+    restart: always

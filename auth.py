@@ -11,7 +11,7 @@ from models import User
 import os
 
 # Configuration
-SECRET_KEY = os.getenv("SECRET_KEY", "supersecretkey_armoire_commune_dijon")
+SECRET_KEY = os.getenv("SECRET_KEY", "insecure_default_key_change_me")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30 * 24 * 60  # 1 month
 
