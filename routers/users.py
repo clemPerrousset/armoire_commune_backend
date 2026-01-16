@@ -8,7 +8,7 @@ import os
 
 from database import get_session
 from models import User
-from auth import get_password_hash, create_access_token, verify_password, get_current_admin, ACCESS_TOKEN_EXPIRE_MINUTES
+from auth import get_password_hash, create_access_token, verify_password, get_current_admin, get_current_user, ACCESS_TOKEN_EXPIRE_MINUTES
 
 router = APIRouter()
 
@@ -68,6 +68,10 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), ses
         data={"sub": user.email}, expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer"}
+
+@router.get("/users/me", response_model=UserRead)
+def read_users_me(current_user: User = Depends(get_current_user)):
+    return current_user
 
 @router.put("/admin/users/{user_id}/promote")
 def promote_user(user_id: int, is_admin: bool, current_admin: User = Depends(get_current_admin), session: Session = Depends(get_session)):

@@ -85,6 +85,13 @@ curl -X POST "http://127.0.0.1:8000/auth/login" \
 -d "username=jean@exemple.com&password=monSuperMotDePasse"
 ```
 
+#### Mon profil
+Récupère les informations de l'utilisateur connecté.
+```bash
+curl -X GET "http://127.0.0.1:8000/users/me" \
+-H "Authorization: Bearer VOTRE_TOKEN_USER"
+```
+
 ### Utilisateurs (Admin)
 
 #### Promouvoir un administrateur
