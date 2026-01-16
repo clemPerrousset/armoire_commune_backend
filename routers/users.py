@@ -4,6 +4,7 @@ from sqlmodel import Session, select
 from typing import List
 from datetime import timedelta
 from pydantic import BaseModel
+import os
 
 from database import get_session
 from models import User
@@ -27,6 +28,10 @@ class UserRead(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
+
+class SuperPromoteRequest(BaseModel):
+    password: str
+    is_admin: bool
 
 @router.post("/auth/signup", response_model=UserRead)
 def create_user(user: UserCreate, session: Session = Depends(get_session)):
@@ -73,3 +78,25 @@ def promote_user(user_id: int, is_admin: bool, current_admin: User = Depends(get
     session.add(user)
     session.commit()
     return {"message": f"User {user.email} admin status set to {is_admin}"}
+
+@router.post("/admin/users/{user_id}/super-promote")
+def promote_user_super(
+    user_id: int,
+    request: SuperPromoteRequest,
+    session: Session = Depends(get_session)
+):
+    super_password = os.getenv("superUserPassword")
+    if not super_password or request.password != super_password:
+         raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials"
+        )
+
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.is_admin = request.is_admin
+    session.add(user)
+    session.commit()
+    return {"message": f"User {user.email} admin status set to {request.is_admin}"}

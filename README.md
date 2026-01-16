@@ -94,6 +94,19 @@ curl -X PUT "http://127.0.0.1:8000/admin/users/2/promote?is_admin=true" \
 -H "Authorization: Bearer VOTRE_TOKEN_ADMIN"
 ```
 
+#### Promouvoir un administrateur (Super User)
+Utilise le mot de passe super utilisateur défini dans les variables d'environnement (`superUserPassword`).
+Ceci est utile pour le bootstrapping ou l'accès d'urgence.
+
+```bash
+curl -X POST "http://127.0.0.1:8000/admin/users/2/super-promote" \
+-H "Content-Type: application/json" \
+-d '{
+  "password": "VOTRE_SUPER_USER_PASSWORD",
+  "is_admin": true
+}'
+```
+
 ### Métadonnées (Admin)
 
 #### Créer un Tag
