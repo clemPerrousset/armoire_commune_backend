@@ -1,24 +1,65 @@
 # armoire_commune_backend
 l'application de partage d'objet à Dijon !
 
-## Installation et Lancement
+## Installation et Déploiement
 
-1. Installer les dépendances :
-   ```bash
-   pip install -r requirements.txt
-   ```
+### Déploiement avec Docker (Recommandé)
 
-2. Initialiser la base de données (exemple) :
-   ```bash
-   python seed.py
-   ```
+Cette méthode est recommandée pour le déploiement sur serveur ou pour lancer l'application rapidement sans gérer les dépendances Python manuellement.
 
-3. Lancer le serveur :
-   ```bash
-   uvicorn main:app --reload
-   ```
+**Prérequis :**
+- Docker
+- Docker Compose
+
+**Étapes :**
+
+1.  **Configurer les variables d'environnement** :
+    Copiez le fichier d'exemple et modifiez-le si nécessaire (notamment la `SECRET_KEY`).
+    ```bash
+    cp .env.example .env
+    ```
+
+2.  **Lancer l'application** :
+    ```bash
+    docker-compose up -d --build
+    ```
+    L'option `-d` lance le conteneur en arrière-plan.
+
+3.  **Accéder à l'application** :
+    L'API sera accessible sur le port **80** de votre machine : `http://localhost` (ou l'IP de votre serveur).
+
+    *Note : Le conteneur initialise automatiquement la base de données au démarrage.*
+
+**Persistance des données :**
+Les données de la base de données sont stockées de manière persistante dans le dossier `./data` à la racine du projet.
+
+---
+
+### Développement Local (Sans Docker)
+
+Pour le développement ou si vous ne souhaitez pas utiliser Docker.
+
+1.  **Installer les dépendances** :
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+2.  **Initialiser la base de données** :
+    ```bash
+    python seed.py
+    ```
+
+3.  **Lancer le serveur** :
+    ```bash
+    uvicorn main:app --reload
+    ```
+    L'application sera accessible sur `http://127.0.0.1:8000`.
 
 ## Documentation API
+
+**Note importante concernant les ports :**
+Les exemples ci-dessous utilisent `http://127.0.0.1:8000`, ce qui correspond à l'installation locale (sans Docker).
+**Si vous utilisez Docker**, l'application est exposée sur le port **80**. Vous devez donc retirer `:8000` des URLs (exemple : `http://127.0.0.1/auth/signup`).
 
 Voici la liste des routes disponibles avec des exemples d'utilisation via `curl`.
 
