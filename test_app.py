@@ -98,3 +98,24 @@ def test_full_flow(session):
     # 9. Check Availability (Should be 1 now)
     res = client.get("/objets?available=true")
     assert len(res.json()) == 1
+
+def test_get_current_user(session):
+    # 1. Create User
+    user = User(nom="Test", prenom="User", email="me@test.com", password_hash=get_password_hash("password"), is_admin=False)
+    session.add(user)
+    session.commit()
+
+    # 2. Login
+    res = client.post("/auth/login", data={"username": "me@test.com", "password": "password"})
+    assert res.status_code == 200
+    token = res.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 3. Get Me
+    res = client.get("/users/me", headers=headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["email"] == "me@test.com"
+    assert data["nom"] == "Test"
+    assert data["prenom"] == "User"
+    assert data["is_admin"] is False
