@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 from typing import List
 from database import get_session
@@ -30,6 +30,15 @@ def create_lieu(lieu: Lieu, session: Session = Depends(get_session), admin: User
 @router.get("/lieux", response_model=List[Lieu], tags=["Public Metadata"])
 def list_lieux(session: Session = Depends(get_session)):
     return session.exec(select(Lieu)).all()
+
+@router.delete("/lieux/{lieu_id}")
+def delete_lieu(lieu_id: int, session: Session = Depends(get_session), admin: User = Depends(get_current_admin)):
+    lieu = session.get(Lieu, lieu_id)
+    if not lieu:
+        raise HTTPException(status_code=404, detail="Lieu not found")
+    session.delete(lieu)
+    session.commit()
+    return {"ok": True}
 
 # Consommables
 @router.post("/consommables", response_model=Consommable)

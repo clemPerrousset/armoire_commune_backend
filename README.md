@@ -142,6 +142,17 @@ curl -X POST "http://127.0.0.1:8000/admin_meta/lieux" \
 }'
 ```
 
+#### Lister les Lieux (Public)
+```bash
+curl -X GET "http://127.0.0.1:8000/admin_meta/lieux"
+```
+
+#### Supprimer un Lieu
+```bash
+curl -X DELETE "http://127.0.0.1:8000/admin_meta/lieux/1" \
+-H "Authorization: Bearer VOTRE_TOKEN_ADMIN"
+```
+
 #### Créer un Consommable
 ```bash
 curl -X POST "http://127.0.0.1:8000/admin_meta/consommables" \
