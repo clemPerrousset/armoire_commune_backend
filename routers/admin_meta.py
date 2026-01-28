@@ -2,10 +2,22 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 from typing import List
 from database import get_session
-from models import Tag, Lieu, Consommable, User
+from models import Tag, Lieu, Consommable, User, Association
 from auth import get_current_admin
 
 router = APIRouter(prefix="/admin_meta", tags=["Admin Metadata"])
+
+# Associations
+@router.post("/associations", response_model=Association)
+def create_association(association: Association, session: Session = Depends(get_session), admin: User = Depends(get_current_admin)):
+    session.add(association)
+    session.commit()
+    session.refresh(association)
+    return association
+
+@router.get("/associations", response_model=List[Association], tags=["Public Metadata"])
+def list_associations(session: Session = Depends(get_session)):
+    return session.exec(select(Association)).all()
 
 # Tags
 @router.post("/tags", response_model=Tag)

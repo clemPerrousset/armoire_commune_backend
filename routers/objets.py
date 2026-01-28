@@ -15,6 +15,7 @@ class ObjetCreate(SQLModel):
     image: Optional[str] = None
     quantite: int = 1
     tag_id: Optional[int] = None
+    association_id: Optional[int] = None
     consommable_ids: List[int] = []
     disponibilite_globale: bool = True
 

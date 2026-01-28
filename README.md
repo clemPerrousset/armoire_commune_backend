@@ -73,7 +73,8 @@ curl -X POST "http://127.0.0.1:8000/auth/signup" \
   "nom": "Dupont",
   "prenom": "Jean",
   "email": "jean@exemple.com",
-  "password": "monSuperMotDePasse"
+  "password": "monSuperMotDePasse",
+  "association_id": 1
 }'
 ```
 
@@ -115,6 +116,24 @@ curl -X POST "http://127.0.0.1:8000/admin/users/2/super-promote" \
 ```
 
 ### Métadonnées (Admin)
+
+#### Créer une Association
+```bash
+curl -X POST "http://127.0.0.1:8000/admin_meta/associations" \
+-H "Authorization: Bearer VOTRE_TOKEN_ADMIN" \
+-H "Content-Type: application/json" \
+-d '{
+  "nom": "Ma Super Asso",
+  "lat": 47.3220,
+  "long": 5.0415,
+  "description": "Association locale"
+}'
+```
+
+#### Lister les Associations (Public)
+```bash
+curl -X GET "http://127.0.0.1:8000/admin_meta/associations"
+```
 
 #### Créer un Tag
 ```bash
@@ -178,6 +197,7 @@ curl -X POST "http://127.0.0.1:8000/objets" \
   "description": "Puissante, filaire",
   "quantite": 2,
   "tag_id": 1,
+  "association_id": 1,
   "consommable_ids": [1],
   "disponibilite_globale": true
 }'

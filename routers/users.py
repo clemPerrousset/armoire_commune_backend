@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlmodel import Session, select
-from typing import List
+from typing import List, Optional
 from datetime import timedelta
 from pydantic import BaseModel
 import os
@@ -17,6 +17,7 @@ class UserCreate(BaseModel):
     prenom: str
     email: str
     password: str
+    association_id: Optional[int] = None
 
 class UserRead(BaseModel):
     id: int
@@ -24,6 +25,7 @@ class UserRead(BaseModel):
     prenom: str
     email: str
     is_admin: bool
+    association_id: Optional[int] = None
 
 class Token(BaseModel):
     access_token: str
@@ -46,7 +48,8 @@ def create_user(user: UserCreate, session: Session = Depends(get_session)):
         prenom=user.prenom,
         email=user.email,
         password_hash=hashed_password,
-        is_admin=False
+        is_admin=False,
+        association_id=user.association_id
     )
     session.add(db_user)
     session.commit()
