@@ -1,6 +1,6 @@
 from sqlmodel import Session, select
 from database import engine, create_db_and_tables
-from models import User, Tag, Lieu, Consommable, Objet
+from models import User, Tag, Lieu, Consommable, Objet, Association
 from auth import get_password_hash
 
 def seed():
@@ -11,20 +11,33 @@ def seed():
             print("Already seeded.")
             return
 
+        # Association
+        asso = Association(
+            nom="La Bricole",
+            lat=47.3220,
+            long=5.0415,
+            description="Association de bricolage du centre-ville"
+        )
+        session.add(asso)
+        session.commit()
+        session.refresh(asso)
+
         # Users
         admin = User(
             nom="Admin",
             prenom="Super",
             email="admin@armoire.com",
             password_hash=get_password_hash("admin123"),
-            is_admin=True
+            is_admin=True,
+            association_id=asso.id
         )
         user1 = User(
             nom="Dupont",
             prenom="Jean",
             email="jean@test.com",
             password_hash=get_password_hash("password"),
-            is_admin=False
+            is_admin=False,
+            association_id=asso.id
         )
         session.add(admin)
         session.add(user1)
@@ -61,7 +74,8 @@ def seed():
             description="Une perceuse puissante.",
             quantite=2,
             tag_id=tag_objs[0].id, # Bricolage
-            disponibilite_globale=True
+            disponibilite_globale=True,
+            association_id=asso.id
         )
         session.add(perceuse)
 
