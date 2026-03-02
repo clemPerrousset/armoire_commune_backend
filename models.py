@@ -56,7 +56,7 @@ class Objet(SQLModel, table=True):
     quantite: int = 1
     disponibilite_globale: bool = Field(default=True)  # Status (e.g. Broken/Working)
 
-    tag_id: Optional[int] = Field(default=None, foreign_key="tag.id")
+    tag_id: Optional[int] = Field(default=None, foreign_key="tag.id", ondelete="SET NULL")
     tag: Optional[Tag] = Relationship(back_populates="objets")
 
     association_id: Optional[int] = Field(default=None, foreign_key="association.id")

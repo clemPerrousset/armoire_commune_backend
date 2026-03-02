@@ -148,6 +148,12 @@ curl -X POST "http://127.0.0.1:8000/admin_meta/tags" \
 curl -X GET "http://127.0.0.1:8000/admin_meta/tags"
 ```
 
+#### Supprimer un Tag
+```bash
+curl -X DELETE "http://127.0.0.1:8000/admin_meta/tags/1" \
+-H "Authorization: Bearer VOTRE_TOKEN_ADMIN"
+```
+
 #### Créer un Lieu
 ```bash
 curl -X POST "http://127.0.0.1:8000/admin_meta/lieux" \
