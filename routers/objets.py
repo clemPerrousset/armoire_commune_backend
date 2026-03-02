@@ -99,3 +99,18 @@ def set_objet_availability(objet_id: int, available: bool, session: Session = De
     session.add(obj)
     session.commit()
     return obj
+
+@router.post("/admin/objets/{objet_id}/clear-alert")
+def clear_objet_alert(objet_id: int, session: Session = Depends(get_session), admin: User = Depends(get_current_admin)):
+    """
+    Reset l'alerte d'un objet (quand l'objet était en retard et réservé après).
+    """
+    obj = session.get(Objet, objet_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Objet not found")
+
+    obj.alert = False
+    session.add(obj)
+    session.commit()
+
+    return {"message": f"Alert cleared for objet {objet_id}"}

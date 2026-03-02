@@ -220,6 +220,13 @@ curl -X PUT "http://127.0.0.1:8000/admin/objets/1/available?available=false" \
 -H "Authorization: Bearer VOTRE_TOKEN_ADMIN"
 ```
 
+#### Réinitialiser l'alerte d'un objet (Admin)
+Pour remettre à `false` l'alerte sur un objet qui n'avait pas été rendu à temps.
+```bash
+curl -X POST "http://127.0.0.1:8000/admin/objets/1/clear-alert" \
+-H "Authorization: Bearer VOTRE_TOKEN_ADMIN"
+```
+
 ### Réservations
 
 #### Créer une réservation (User)
@@ -251,5 +258,12 @@ curl -X GET "http://127.0.0.1:8000/admin/reservations" \
 Marque la réservation comme terminée.
 ```bash
 curl -X POST "http://127.0.0.1:8000/admin/reservations/1/return" \
+-H "Authorization: Bearer VOTRE_TOKEN_ADMIN"
+```
+
+#### Vérifier les retards de réservations (Admin)
+Repousse d'une semaine la réservation si l'objet n'est pas réservé derrière, ou passe l'objet en `alert=true` s'il est réservé.
+```bash
+curl -X POST "http://127.0.0.1:8000/admin/reservations/check-late" \
 -H "Authorization: Bearer VOTRE_TOKEN_ADMIN"
 ```
