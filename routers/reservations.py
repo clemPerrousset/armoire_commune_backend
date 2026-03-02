@@ -79,3 +79,48 @@ def return_object(reservation_id: int, session: Session = Depends(get_session), 
     session.add(res)
     session.commit()
     return {"message": "Object returned", "reservation_id": reservation_id}
+
+@router.post("/admin/reservations/check-late")
+def check_late_reservations(session: Session = Depends(get_session), admin: User = Depends(get_current_admin)):
+    now = datetime.now()
+    # Find all active reservations that are past their end date
+    late_reservations = session.exec(
+        select(Reservation).where(Reservation.status == "active", Reservation.date_fin < now)
+    ).all()
+
+    processed_count = 0
+    extended_count = 0
+    alerted_count = 0
+
+    for late_res in late_reservations:
+        processed_count += 1
+        obj = session.get(Objet, late_res.objet_id)
+        if not obj:
+            continue
+
+        # Check if there are any future reservations for this object
+        future_reservations_exist = False
+        for res in obj.reservations:
+            # We are looking for an active reservation that starts after this one was supposed to end
+            if res.id != late_res.id and res.status == 'active' and res.date_debut >= late_res.date_fin:
+                future_reservations_exist = True
+                break
+
+        if future_reservations_exist:
+            # If there's a reservation after, set the object to alert
+            obj.alert = True
+            session.add(obj)
+            alerted_count += 1
+        else:
+            # If no one reserved it after, push the reservation back by a week
+            late_res.date_fin += timedelta(days=7)
+            session.add(late_res)
+            extended_count += 1
+
+    session.commit()
+    return {
+        "message": "Late reservations checked",
+        "processed": processed_count,
+        "extended": extended_count,
+        "alerts_triggered": alerted_count
+    }

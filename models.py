@@ -55,6 +55,7 @@ class Objet(SQLModel, table=True):
     image: Optional[str] = None
     quantite: int = 1
     disponibilite_globale: bool = Field(default=True)  # Status (e.g. Broken/Working)
+    alert: bool = Field(default=False)  # True if object was not returned on time and is reserved by someone else
 
     tag_id: Optional[int] = Field(default=None, foreign_key="tag.id", ondelete="SET NULL")
     tag: Optional[Tag] = Relationship(back_populates="objets")
