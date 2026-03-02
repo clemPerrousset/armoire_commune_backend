@@ -113,6 +113,20 @@ def test_full_flow(session):
     res = client.get(f"/objets?available=true&date_check={monday_date.isoformat()}")
     assert len(res.json()) == 1
 
+    # 10. Check Case-Insensitive Search
+    res = client.get("/objets?nom=dRiLL")
+    assert res.status_code == 200
+    assert len(res.json()) == 1
+    assert res.json()[0]["nom"] == "Drill"
+
+    res = client.get("/objets?nom=DRILL")
+    assert res.status_code == 200
+    assert len(res.json()) == 1
+
+    res = client.get("/objets?nom=drill")
+    assert res.status_code == 200
+    assert len(res.json()) == 1
+
 def test_get_current_user(session):
     # 1. Create User
     user = User(nom="Test", prenom="User", email="me@test.com", password_hash=get_password_hash("password"), is_admin=False)

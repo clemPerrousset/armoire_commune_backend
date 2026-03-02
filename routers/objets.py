@@ -48,7 +48,7 @@ def list_objets(
 ):
     query = select(Objet)
     if nom:
-        query = query.where(Objet.nom.contains(nom))
+        query = query.where(Objet.nom.icontains(nom))
     if tag_id:
         query = query.where(Objet.tag_id == tag_id)
 
