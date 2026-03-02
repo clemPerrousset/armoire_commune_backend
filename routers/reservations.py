@@ -26,7 +26,14 @@ def create_reservation(res_in: ReservationCreate, session: Session = Depends(get
     if not obj.disponibilite_globale:
         raise HTTPException(status_code=400, detail="Objet currently unavailable (broken/maintenance)")
 
-    date_fin = res_in.date_debut + timedelta(days=7)
+    # Adjust date_debut to the next Wednesday if it's not a Wednesday
+    # weekday() returns 2 for Wednesday
+    days_ahead = (2 - res_in.date_debut.weekday()) % 7
+    adjusted_date_debut = res_in.date_debut + timedelta(days=days_ahead)
+
+    # Calculate date_fin: next Tuesday (6 days later) at 22:00:00
+    date_fin = adjusted_date_debut + timedelta(days=6)
+    date_fin = date_fin.replace(hour=22, minute=0, second=0, microsecond=0)
 
     # Count overlap
     overlap_count = 0
@@ -34,7 +41,7 @@ def create_reservation(res_in: ReservationCreate, session: Session = Depends(get
     for res in obj.reservations:
         if res.status == 'active':
             # Overlap logic: Res.start < New.End AND Res.end > New.Start
-            if res.date_debut < date_fin and res.date_fin > res_in.date_debut:
+            if res.date_debut < date_fin and res.date_fin > adjusted_date_debut:
                 overlap_count += 1
 
     if overlap_count >= obj.quantite:
@@ -45,7 +52,7 @@ def create_reservation(res_in: ReservationCreate, session: Session = Depends(get
         objet_id=res_in.objet_id,
         user_id=current_user.id,
         lieu_id=res_in.lieu_id,
-        date_debut=res_in.date_debut,
+        date_debut=adjusted_date_debut,
         date_fin=date_fin,
         status="active"
     )

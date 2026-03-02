@@ -61,9 +61,11 @@ def list_objets(
     if not date_check:
         date_check = datetime.now()
 
-    # We check if we can START a reservation at date_check (7 days duration)
-    check_start = date_check
-    check_end = date_check + timedelta(days=7)
+    # We check if we can START a reservation at date_check (Wednesday to next Tuesday 22:00)
+    days_ahead = (2 - date_check.weekday()) % 7
+    check_start = date_check + timedelta(days=days_ahead)
+    check_end = check_start + timedelta(days=6)
+    check_end = check_end.replace(hour=22, minute=0, second=0, microsecond=0)
 
     available_objets = []
 

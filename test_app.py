@@ -72,22 +72,36 @@ def test_full_flow(session):
     user_headers = {"Authorization": f"Bearer {user_token}"}
 
     # 6. Reserve Objet
+    # Use a specific date (Monday) to test the Wednesday adjustment logic
+    monday_date = datetime(2023, 10, 23, 10, 30) # Monday
     res_data = {
         "objet_id": objet_id,
         "lieu_id": lieu.id,
-        "date_debut": datetime.now().isoformat()
+        "date_debut": monday_date.isoformat()
     }
     res = client.post("/reservations", json=res_data, headers=user_headers)
     if res.status_code != 200:
         print(res.json())
     assert res.status_code == 200
-    reservation_id = res.json()["id"]
+
+    # Verify the reservation dates were correctly calculated
+    reservation = res.json()
+    reservation_id = reservation["id"]
+
+    # Wednesday 2023-10-25 10:30:00
+    expected_start = "2023-10-25T10:30:00"
+    # Tuesday 2023-10-31 22:00:00
+    expected_end = "2023-10-31T22:00:00"
+
+    assert reservation["date_debut"] == expected_start
+    assert reservation["date_fin"] == expected_end
 
     # 7. Check Availability (Should be 0 now)
     # Note: list_objets logic checks if quantite > active reservations
-    # Our reservation starts NOW.
-    res = client.get("/objets?available=true")
-    # Should be empty because quantity is 1 and 1 is reserved
+    # Our reservation is active for the same date check window.
+    # So if we query availability on the same Monday date, it will check the window [Wednesday, next Tuesday]
+    res = client.get(f"/objets?available=true&date_check={monday_date.isoformat()}")
+    # Should be empty because quantity is 1 and 1 is reserved in that window
     assert res.status_code == 200
     assert len(res.json()) == 0
 
@@ -96,7 +110,7 @@ def test_full_flow(session):
     assert res.status_code == 200
 
     # 9. Check Availability (Should be 1 now)
-    res = client.get("/objets?available=true")
+    res = client.get(f"/objets?available=true&date_check={monday_date.isoformat()}")
     assert len(res.json()) == 1
 
 def test_get_current_user(session):
