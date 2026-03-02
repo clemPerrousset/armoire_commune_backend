@@ -187,6 +187,13 @@ curl -X POST "http://127.0.0.1:8000/admin_meta/consommables" \
 
 ### Objets
 
+#### Rechercher un Objet par nom (Public)
+Recherche partielle et insensible à la casse, idéale pour une barre de recherche "live".
+Le paramètre `available=false` permet de récupérer tous les objets correspondants, même s'ils sont actuellement réservés.
+```bash
+curl -X GET "http://127.0.0.1:8000/objets?nom=perceuse&available=false"
+```
+
 #### Créer un Objet (Admin)
 ```bash
 curl -X POST "http://127.0.0.1:8000/objets" \
