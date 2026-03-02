@@ -31,6 +31,15 @@ def create_tag(tag: Tag, session: Session = Depends(get_session), admin: User = 
 def list_tags(session: Session = Depends(get_session)):
     return session.exec(select(Tag)).all()
 
+@router.delete("/tags/{tag_id}")
+def delete_tag(tag_id: int, session: Session = Depends(get_session), admin: User = Depends(get_current_admin)):
+    tag = session.get(Tag, tag_id)
+    if not tag:
+        raise HTTPException(status_code=404, detail="Tag not found")
+    session.delete(tag)
+    session.commit()
+    return {"ok": True}
+
 # Lieux
 @router.post("/lieux", response_model=Lieu)
 def create_lieu(lieu: Lieu, session: Session = Depends(get_session), admin: User = Depends(get_current_admin)):
