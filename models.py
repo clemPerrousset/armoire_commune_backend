@@ -16,7 +16,13 @@ class UserObjetHistoriqueLink(SQLModel, table=True):
     objet_id: Optional[int] = Field(default=None, foreign_key="objet.id", primary_key=True)
     date_consultation: datetime = Field(default_factory=datetime.utcnow)
 
+
+class UserLieuLink(SQLModel, table=True):
+    user_id: Optional[int] = Field(default=None, foreign_key="user.id", primary_key=True)
+    lieu_id: Optional[int] = Field(default=None, foreign_key="lieu.id", primary_key=True)
+
 class Association(SQLModel, table=True):
+
     id: Optional[int] = Field(default=None, primary_key=True)
     nom: str
     lat: float
@@ -38,15 +44,20 @@ class User(SQLModel, table=True):
     association_id: Optional[int] = Field(default=None, foreign_key="association.id")
     association: Optional[Association] = Relationship(back_populates="users")
 
+
     favoris: List["Objet"] = Relationship(back_populates="favoris_par", link_model=UserObjetFavorisLink)
     historique: List["Objet"] = Relationship(back_populates="consulte_par", link_model=UserObjetHistoriqueLink)
+    lieux: List["Lieu"] = Relationship(back_populates="users", link_model=UserLieuLink)
 
 class Lieu(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     nom: str
     lat: float
     long: float
+
     adresse: str
+
+    users: List["User"] = Relationship(back_populates="lieux", link_model=UserLieuLink)
 
 class Tag(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -68,9 +79,14 @@ class Objet(SQLModel, table=True):
     image: Optional[str] = None
     quantite: int = 1
     disponibilite_globale: bool = Field(default=True)  # Status (e.g. Broken/Working)
+
     alert: bool = Field(default=False)  # True if object was not returned on time and is reserved by someone else
 
+    current_lieu_id: Optional[int] = Field(default=None, foreign_key="lieu.id", ondelete="SET NULL")
+    current_lieu: Optional[Lieu] = Relationship()
+
     tag_id: Optional[int] = Field(default=None, foreign_key="tag.id", ondelete="SET NULL")
+
     tag: Optional[Tag] = Relationship(back_populates="objets")
 
     association_id: Optional[int] = Field(default=None, foreign_key="association.id")
