@@ -33,6 +33,7 @@ class User(SQLModel, table=True):
     email: str = Field(index=True, unique=True)
     password_hash: str
     is_admin: bool = Field(default=False)
+    is_point_relais: bool = Field(default=False)
 
     association_id: Optional[int] = Field(default=None, foreign_key="association.id")
     association: Optional[Association] = Relationship(back_populates="users")

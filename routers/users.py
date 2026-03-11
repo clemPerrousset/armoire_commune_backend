@@ -25,6 +25,7 @@ class UserRead(BaseModel):
     prenom: str
     email: str
     is_admin: bool
+    is_point_relais: bool
     association_id: Optional[int] = None
 
 class Token(BaseModel):
@@ -135,6 +136,16 @@ def promote_user(user_id: int, is_admin: bool, current_admin: User = Depends(get
     session.add(user)
     session.commit()
     return {"message": f"User {user.email} admin status set to {is_admin}"}
+
+@router.put("/admin/users/{user_id}/promote-point-relais")
+def promote_user_point_relais(user_id: int, is_point_relais: bool, current_admin: User = Depends(get_current_admin), session: Session = Depends(get_session)):
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.is_point_relais = is_point_relais
+    session.add(user)
+    session.commit()
+    return {"message": f"User {user.email} point relais status set to {is_point_relais}"}
 
 @router.post("/admin/users/{user_id}/super-promote")
 def promote_user_super(
