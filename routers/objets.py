@@ -4,8 +4,8 @@ from sqlmodel import Session, select, SQLModel
 from datetime import datetime, timedelta
 
 from database import get_session
-from models import Objet, User, Consommable, ObjetConsommableLink, Reservation
-from auth import get_current_admin
+from models import Objet, User, Consommable, ObjetConsommableLink, Reservation, UserObjetHistoriqueLink
+from auth import get_current_admin, get_current_user_optional
 
 router = APIRouter(tags=["Objets"])
 
@@ -85,6 +85,34 @@ def list_objets(
             available_objets.append(obj)
 
     return available_objets
+
+@router.get("/objets/{objet_id}", response_model=Objet)
+def get_objet(
+    objet_id: int,
+    session: Session = Depends(get_session),
+    current_user: Optional[User] = Depends(get_current_user_optional)
+):
+    obj = session.get(Objet, objet_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Objet not found")
+
+    if current_user:
+        # Check if the history link already exists
+        statement = select(UserObjetHistoriqueLink).where(
+            UserObjetHistoriqueLink.user_id == current_user.id,
+            UserObjetHistoriqueLink.objet_id == objet_id
+        )
+        historique_link = session.exec(statement).first()
+
+        if historique_link:
+            historique_link.date_consultation = datetime.utcnow()
+        else:
+            historique_link = UserObjetHistoriqueLink(user_id=current_user.id, objet_id=objet_id)
+
+        session.add(historique_link)
+        session.commit()
+
+    return obj
 
 @router.put("/admin/objets/{objet_id}/available")
 def set_objet_availability(objet_id: int, available: bool, session: Session = Depends(get_session), admin: User = Depends(get_current_admin)):

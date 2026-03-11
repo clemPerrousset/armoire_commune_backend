@@ -53,6 +53,20 @@ def get_current_user(token: str = Depends(oauth2_scheme), session: Session = Dep
         raise credentials_exception
     return user
 
+def get_current_user_optional(token: Optional[str] = Depends(OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)), session: Session = Depends(get_session)) -> Optional[User]:
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            return None
+    except JWTError:
+        return None
+
+    user = session.query(User).filter(User.email == email).first()
+    return user
+
 def get_current_admin(current_user: User = Depends(get_current_user)):
     if not current_user.is_admin:
         raise HTTPException(
