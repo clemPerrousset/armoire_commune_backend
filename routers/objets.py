@@ -4,8 +4,8 @@ from sqlmodel import Session, select, SQLModel
 from datetime import datetime, timedelta
 
 from database import get_session
-from models import Objet, User, Consommable, ObjetConsommableLink, Reservation, UserObjetHistoriqueLink
-from auth import get_current_admin, get_current_user_optional
+from models import Objet, User, Consommable, ObjetConsommableLink, Reservation, UserObjetHistoriqueLink, Lieu, UserLieuLink
+from auth import get_current_admin, get_current_user_optional, get_current_point_relais
 
 router = APIRouter(tags=["Objets"])
 
@@ -144,3 +144,63 @@ def clear_objet_alert(objet_id: int, session: Session = Depends(get_session), ad
     session.commit()
 
     return {"message": f"Alert cleared for objet {objet_id}"}
+
+@router.post("/objets/{objet_id}/retirer")
+def retirer_objet(objet_id: int, session: Session = Depends(get_session), current_user: User = Depends(get_current_point_relais)):
+    obj = session.get(Objet, objet_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Objet not found")
+
+    user_lieux_ids = [lieu.id for lieu in current_user.lieux]
+
+    if not user_lieux_ids:
+        raise HTTPException(status_code=403, detail="Point relais has no associated lieux")
+
+    # Find active reservation for this object at one of the user's lieux
+    statement = select(Reservation).where(
+        Reservation.objet_id == objet_id,
+        Reservation.status == "active",
+        Reservation.lieu_id.in_(user_lieux_ids)
+    )
+    reservation = session.exec(statement).first()
+
+    if not reservation:
+        raise HTTPException(status_code=404, detail="No active reservation found for this object at your locations")
+
+    reservation.status = "en_cours"
+    session.add(reservation)
+    session.commit()
+
+    return {"message": "Objet retiré", "reservation_id": reservation.id}
+
+@router.post("/objets/{objet_id}/retourner")
+def retourner_objet(objet_id: int, lieu_id: int, session: Session = Depends(get_session), current_user: User = Depends(get_current_point_relais)):
+    obj = session.get(Objet, objet_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Objet not found")
+
+    user_lieux_ids = [lieu.id for lieu in current_user.lieux]
+
+    if lieu_id not in user_lieux_ids:
+        raise HTTPException(status_code=403, detail="You can only return an object to a location assigned to you")
+
+    # Find en_cours or active reservation for this object
+    statement = select(Reservation).where(
+        Reservation.objet_id == objet_id,
+        Reservation.status.in_(["en_cours", "active"])
+    )
+    reservation = session.exec(statement).first()
+
+    if reservation:
+        reservation.status = "terminee"
+        session.add(reservation)
+
+    obj.current_lieu_id = lieu_id
+    session.add(obj)
+    session.commit()
+
+    msg = "Objet retourné"
+    if reservation:
+        msg += f" (Reservation {reservation.id} terminée)"
+
+    return {"message": msg, "objet_id": obj.id, "current_lieu_id": lieu_id}

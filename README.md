@@ -119,7 +119,19 @@ curl -X DELETE "http://127.0.0.1:8000/users/favoris/1" \
 -H "Authorization: Bearer VOTRE_TOKEN_USER"
 ```
 
+
 ### Utilisateurs (Admin)
+
+#### Assigner un Lieu à un Point Relais
+Permet à un administrateur d'assigner un `Lieu` à un utilisateur de type `point_relais` pour qu'il puisse scanner des objets à ce lieu.
+```bash
+curl -X POST "http://127.0.0.1:8000/admin/users/2/lieux/1" -H "Authorization: Bearer VOTRE_TOKEN_ADMIN"
+```
+
+#### Retirer un Lieu d'un Point Relais
+```bash
+curl -X DELETE "http://127.0.0.1:8000/admin/users/2/lieux/1" -H "Authorization: Bearer VOTRE_TOKEN_ADMIN"
+```
 
 #### Promouvoir un administrateur
 Nécessite un token Admin.
@@ -264,6 +276,24 @@ Pour remettre à `false` l'alerte sur un objet qui n'avait pas été rendu à te
 ```bash
 curl -X POST "http://127.0.0.1:8000/admin/objets/1/clear-alert" \
 -H "Authorization: Bearer VOTRE_TOKEN_ADMIN"
+```
+
+
+### Objets (Scan Point Relais)
+
+Ces routes sont réservées aux utilisateurs ayant le rôle `is_point_relais` (ou `is_admin`) pour scanner les QR codes des objets.
+
+#### Retirer un Objet (Scan "Retrait")
+Marque une réservation `active` pour cet objet à l'un des lieux assignés au point relais comme `en_cours` (l'utilisateur est venu chercher l'objet).
+```bash
+curl -X POST "http://127.0.0.1:8000/objets/1/retirer" \
+-H "Authorization: Bearer VOTRE_TOKEN_POINT_RELAIS"
+```
+
+#### Retourner un Objet (Scan "Retour")
+Termine la réservation `en_cours` ou `active` pour cet objet, et met à jour sa localisation physique (`current_lieu_id`) au lieu où le point relais effectue le scan. Le `lieu_id` doit être un lieu assigné au point relais.
+```bash
+curl -X POST "http://127.0.0.1:8000/objets/1/retourner?lieu_id=1" -H "Authorization: Bearer VOTRE_TOKEN_POINT_RELAIS"
 ```
 
 ### Réservations

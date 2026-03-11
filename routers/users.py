@@ -7,7 +7,7 @@ from pydantic import BaseModel
 import os
 
 from database import get_session
-from models import User, Objet, UserObjetFavorisLink, UserObjetHistoriqueLink
+from models import User, Objet, UserObjetFavorisLink, UserObjetHistoriqueLink, Lieu, UserLieuLink
 from auth import get_password_hash, create_access_token, verify_password, get_current_admin, get_current_user, ACCESS_TOKEN_EXPIRE_MINUTES
 
 router = APIRouter()
@@ -168,3 +168,41 @@ def promote_user_super(
     session.add(user)
     session.commit()
     return {"message": f"User {user.email} admin status set to {request.is_admin}"}
+
+
+@router.post("/admin/users/{user_id}/lieux/{lieu_id}")
+def assign_lieu_to_user(user_id: int, lieu_id: int, current_admin: User = Depends(get_current_admin), session: Session = Depends(get_session)):
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    lieu = session.get(Lieu, lieu_id)
+    if not lieu:
+        raise HTTPException(status_code=404, detail="Lieu not found")
+
+    link = session.exec(select(UserLieuLink).where(
+        UserLieuLink.user_id == user_id,
+        UserLieuLink.lieu_id == lieu_id
+    )).first()
+
+    if link:
+        return {"message": "Lieu already assigned to user"}
+
+    new_link = UserLieuLink(user_id=user_id, lieu_id=lieu_id)
+    session.add(new_link)
+    session.commit()
+    return {"message": f"Lieu {lieu.nom} assigned to User {user.email}"}
+
+@router.delete("/admin/users/{user_id}/lieux/{lieu_id}")
+def remove_lieu_from_user(user_id: int, lieu_id: int, current_admin: User = Depends(get_current_admin), session: Session = Depends(get_session)):
+    link = session.exec(select(UserLieuLink).where(
+        UserLieuLink.user_id == user_id,
+        UserLieuLink.lieu_id == lieu_id
+    )).first()
+
+    if not link:
+        raise HTTPException(status_code=404, detail="Lieu not assigned to this user")
+
+    session.delete(link)
+    session.commit()
+    return {"message": "Lieu removed from user"}
