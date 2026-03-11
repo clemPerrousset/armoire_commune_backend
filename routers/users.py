@@ -7,7 +7,7 @@ from pydantic import BaseModel
 import os
 
 from database import get_session
-from models import User
+from models import User, Objet, UserObjetFavorisLink, UserObjetHistoriqueLink
 from auth import get_password_hash, create_access_token, verify_password, get_current_admin, get_current_user, ACCESS_TOKEN_EXPIRE_MINUTES
 
 router = APIRouter()
@@ -75,6 +75,56 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), ses
 @router.get("/users/me", response_model=UserRead)
 def read_users_me(current_user: User = Depends(get_current_user)):
     return current_user
+
+@router.post("/users/favoris/{objet_id}")
+def add_favori(objet_id: int, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
+    objet = session.get(Objet, objet_id)
+    if not objet:
+        raise HTTPException(status_code=404, detail="Objet not found")
+
+    link = session.exec(select(UserObjetFavorisLink).where(
+        UserObjetFavorisLink.user_id == current_user.id,
+        UserObjetFavorisLink.objet_id == objet_id
+    )).first()
+
+    if link:
+        return {"message": "Objet already in favorites"}
+
+    new_link = UserObjetFavorisLink(user_id=current_user.id, objet_id=objet_id)
+    session.add(new_link)
+    session.commit()
+    return {"message": "Objet added to favorites"}
+
+@router.delete("/users/favoris/{objet_id}")
+def remove_favori(objet_id: int, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
+    link = session.exec(select(UserObjetFavorisLink).where(
+        UserObjetFavorisLink.user_id == current_user.id,
+        UserObjetFavorisLink.objet_id == objet_id
+    )).first()
+
+    if not link:
+        raise HTTPException(status_code=404, detail="Objet not found in favorites")
+
+    session.delete(link)
+    session.commit()
+    return {"message": "Objet removed from favorites"}
+
+@router.get("/users/favoris", response_model=List[Objet])
+def list_favoris(session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
+    statement = select(Objet).join(UserObjetFavorisLink).where(UserObjetFavorisLink.user_id == current_user.id)
+    favoris = session.exec(statement).all()
+    return favoris
+
+@router.get("/users/historique", response_model=List[Objet])
+def list_historique(session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
+    statement = (
+        select(Objet)
+        .join(UserObjetHistoriqueLink)
+        .where(UserObjetHistoriqueLink.user_id == current_user.id)
+        .order_by(UserObjetHistoriqueLink.date_consultation.desc())
+    )
+    historique = session.exec(statement).all()
+    return historique
 
 @router.put("/admin/users/{user_id}/promote")
 def promote_user(user_id: int, is_admin: bool, current_admin: User = Depends(get_current_admin), session: Session = Depends(get_session)):

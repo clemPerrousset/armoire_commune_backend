@@ -93,6 +93,32 @@ curl -X GET "http://127.0.0.1:8000/users/me" \
 -H "Authorization: Bearer VOTRE_TOKEN_USER"
 ```
 
+#### Historique des objets consultés
+Récupère la liste des objets que l'utilisateur a consultés, triés du plus récent au plus ancien.
+```bash
+curl -X GET "http://127.0.0.1:8000/users/historique" \
+-H "Authorization: Bearer VOTRE_TOKEN_USER"
+```
+
+#### Liste des favoris
+Récupère la liste des objets favoris de l'utilisateur.
+```bash
+curl -X GET "http://127.0.0.1:8000/users/favoris" \
+-H "Authorization: Bearer VOTRE_TOKEN_USER"
+```
+
+#### Ajouter un objet aux favoris
+```bash
+curl -X POST "http://127.0.0.1:8000/users/favoris/1" \
+-H "Authorization: Bearer VOTRE_TOKEN_USER"
+```
+
+#### Retirer un objet des favoris
+```bash
+curl -X DELETE "http://127.0.0.1:8000/users/favoris/1" \
+-H "Authorization: Bearer VOTRE_TOKEN_USER"
+```
+
 ### Utilisateurs (Admin)
 
 #### Promouvoir un administrateur

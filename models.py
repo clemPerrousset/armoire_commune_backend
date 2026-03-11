@@ -7,6 +7,15 @@ class ObjetConsommableLink(SQLModel, table=True):
     objet_id: Optional[int] = Field(default=None, foreign_key="objet.id", primary_key=True)
     consommable_id: Optional[int] = Field(default=None, foreign_key="consommable.id", primary_key=True)
 
+class UserObjetFavorisLink(SQLModel, table=True):
+    user_id: Optional[int] = Field(default=None, foreign_key="user.id", primary_key=True)
+    objet_id: Optional[int] = Field(default=None, foreign_key="objet.id", primary_key=True)
+
+class UserObjetHistoriqueLink(SQLModel, table=True):
+    user_id: Optional[int] = Field(default=None, foreign_key="user.id", primary_key=True)
+    objet_id: Optional[int] = Field(default=None, foreign_key="objet.id", primary_key=True)
+    date_consultation: datetime = Field(default_factory=datetime.utcnow)
+
 class Association(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     nom: str
@@ -27,6 +36,9 @@ class User(SQLModel, table=True):
 
     association_id: Optional[int] = Field(default=None, foreign_key="association.id")
     association: Optional[Association] = Relationship(back_populates="users")
+
+    favoris: List["Objet"] = Relationship(back_populates="favoris_par", link_model=UserObjetFavorisLink)
+    historique: List["Objet"] = Relationship(back_populates="consulte_par", link_model=UserObjetHistoriqueLink)
 
 class Lieu(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -65,6 +77,9 @@ class Objet(SQLModel, table=True):
 
     consommables: List[Consommable] = Relationship(back_populates="objets", link_model=ObjetConsommableLink)
     reservations: List["Reservation"] = Relationship(back_populates="objet")
+
+    favoris_par: List[User] = Relationship(back_populates="favoris", link_model=UserObjetFavorisLink)
+    consulte_par: List[User] = Relationship(back_populates="historique", link_model=UserObjetHistoriqueLink)
 
 class Reservation(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
