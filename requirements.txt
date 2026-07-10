@@ -9,3 +9,4 @@ httpx
 pytest
 gunicorn
 bcrypt==4.0.1
+Pillow

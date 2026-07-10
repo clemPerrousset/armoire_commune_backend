@@ -72,7 +72,6 @@ def seed():
         perceuse = Objet(
             nom="Perceuse Percussion",
             description="Une perceuse puissante.",
-            quantite=2,
             tag_id=tag_objs[0].id, # Bricolage
             disponibilite_globale=True,
             association_id=asso.id

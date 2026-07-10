@@ -17,6 +17,9 @@ COPY . .
 # Make entrypoint executable
 RUN chmod +x entrypoint.sh
 
+# Persistent data directories (mounted via docker-compose volume)
+RUN mkdir -p /data/images
+
 # Expose the port
 EXPOSE 8000
 

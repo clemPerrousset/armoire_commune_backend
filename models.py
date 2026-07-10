@@ -22,7 +22,6 @@ class UserLieuLink(SQLModel, table=True):
     lieu_id: Optional[int] = Field(default=None, foreign_key="lieu.id", primary_key=True)
 
 class Association(SQLModel, table=True):
-
     id: Optional[int] = Field(default=None, primary_key=True)
     nom: str
     lat: float
@@ -44,7 +43,6 @@ class User(SQLModel, table=True):
     association_id: Optional[int] = Field(default=None, foreign_key="association.id")
     association: Optional[Association] = Relationship(back_populates="users")
 
-
     favoris: List["Objet"] = Relationship(back_populates="favoris_par", link_model=UserObjetFavorisLink)
     historique: List["Objet"] = Relationship(back_populates="consulte_par", link_model=UserObjetHistoriqueLink)
     lieux: List["Lieu"] = Relationship(back_populates="users", link_model=UserLieuLink)
@@ -54,8 +52,9 @@ class Lieu(SQLModel, table=True):
     nom: str
     lat: float
     long: float
-
     adresse: str
+    # Horaires d'ouverture ou informations complémentaires sur le lieu
+    description: Optional[str] = Field(default=None)
 
     users: List["User"] = Relationship(back_populates="lieux", link_model=UserLieuLink)
 
@@ -77,16 +76,15 @@ class Objet(SQLModel, table=True):
     nom: str
     description: str
     image: Optional[str] = None
-    quantite: int = 1
-    disponibilite_globale: bool = Field(default=True)  # Status (e.g. Broken/Working)
+    # quantite supprimée : 1 fiche = 1 calendrier
+    disponibilite_globale: bool = Field(default=True)  # False si en maintenance/panne
 
-    alert: bool = Field(default=False)  # True if object was not returned on time and is reserved by someone else
+    alert: bool = Field(default=False)  # True si retard avec prochaine réservation
 
     current_lieu_id: Optional[int] = Field(default=None, foreign_key="lieu.id", ondelete="SET NULL")
     current_lieu: Optional[Lieu] = Relationship()
 
     tag_id: Optional[int] = Field(default=None, foreign_key="tag.id", ondelete="SET NULL")
-
     tag: Optional[Tag] = Relationship(back_populates="objets")
 
     association_id: Optional[int] = Field(default=None, foreign_key="association.id")
@@ -102,7 +100,8 @@ class Reservation(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     date_debut: datetime
     date_fin: datetime
-    status: str = "active"  # active, terminee, annulee
+    status: str = "active"  # active, en_cours, terminee, annulee
+    nb_semaines: int = Field(default=1)  # Durée demandée par l'utilisateur (1, 2 ou 3)
 
     user_id: Optional[int] = Field(default=None, foreign_key="user.id")
     user: Optional[User] = Relationship()

@@ -1,40 +1,18 @@
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session, SQLModel, create_engine
-from sqlmodel.pool import StaticPool
 from datetime import datetime, timedelta
 
 from main import app
-from database import get_session
 from models import Objet, Reservation, User
 
-# In-memory database
-engine = create_engine(
-    "sqlite://",
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
-
-def get_session_override():
-    with Session(engine) as session:
-        yield session
-
-app.dependency_overrides[get_session] = get_session_override
-
+# conftest.py gère l'engine de test et la fixture session
 client = TestClient(app)
 
-@pytest.fixture(name="session")
-def session_fixture():
-    SQLModel.metadata.create_all(engine)
-    with Session(engine) as session:
-        yield session
-    SQLModel.metadata.drop_all(engine)
-
-def test_check_late_reservations_extends_if_no_future(session: Session):
+def test_check_late_reservations_extends_if_no_future(session):
     admin_user = User(nom="Admin", prenom="A", email="admin@test.com", password_hash="hash", is_admin=True)
     user = User(nom="User", prenom="U", email="user@test.com", password_hash="hash")
 
-    objet = Objet(nom="Perc", description="test", quantite=1)
+    objet = Objet(nom="Perc", description="test")
 
     session.add(admin_user)
     session.add(user)
@@ -70,12 +48,12 @@ def test_check_late_reservations_extends_if_no_future(session: Session):
 
     app.dependency_overrides.pop(get_current_admin)
 
-def test_check_late_reservations_alerts_if_future(session: Session):
+def test_check_late_reservations_alerts_if_future(session):
     admin_user = User(nom="Admin", prenom="A", email="admin2@test.com", password_hash="hash", is_admin=True)
     user1 = User(nom="User1", prenom="U", email="user1@test.com", password_hash="hash")
     user2 = User(nom="User2", prenom="U", email="user2@test.com", password_hash="hash")
 
-    objet = Objet(nom="Perc2", description="test", quantite=1)
+    objet = Objet(nom="Perc2", description="test")
 
     session.add(admin_user)
     session.add(user1)

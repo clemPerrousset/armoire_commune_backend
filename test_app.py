@@ -1,31 +1,13 @@
 from fastapi.testclient import TestClient
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import select
 from main import app
-from database import get_session
 from models import User, Tag, Lieu, Objet, Reservation
 from auth import get_password_hash
 import pytest
 from datetime import datetime
-from sqlalchemy.pool import StaticPool
 
-# Use an in-memory SQLite database for testing
-sqlite_url = "sqlite://"
-connect_args = {"check_same_thread": False}
-engine = create_engine(sqlite_url, connect_args=connect_args, poolclass=StaticPool)
-
-def get_session_override():
-    with Session(engine) as session:
-        yield session
-
-app.dependency_overrides[get_session] = get_session_override
+# conftest.py gère l'engine de test et la fixture session
 client = TestClient(app)
-
-@pytest.fixture(name="session")
-def session_fixture():
-    SQLModel.metadata.create_all(engine)
-    with Session(engine) as session:
-        yield session
-    SQLModel.metadata.drop_all(engine)
 
 def test_full_flow(session):
     # 1. Create Data
@@ -47,11 +29,10 @@ def test_full_flow(session):
     admin_token = res.json()["access_token"]
     admin_headers = {"Authorization": f"Bearer {admin_token}"}
 
-    # 3. Create Objet (Admin)
+    # 3. Create Objet (Admin) — sans champ quantite
     obj_data = {
         "nom": "Drill",
         "description": "Powerful",
-        "quantite": 1,
         "tag_id": tag.id,
         "consommable_ids": []
     }
@@ -59,7 +40,7 @@ def test_full_flow(session):
     assert res.status_code == 200
     objet_id = res.json()["id"]
 
-    # 4. List Objets (Public)
+    # 4. List Objets (Public) — sans paramètre = tous
     res = client.get("/objets")
     assert res.status_code == 200
     assert len(res.json()) == 1
@@ -71,37 +52,29 @@ def test_full_flow(session):
     user_token = res.json()["access_token"]
     user_headers = {"Authorization": f"Bearer {user_token}"}
 
-    # 6. Reserve Objet
-    # Use a specific date (Monday) to test the Wednesday adjustment logic
-    monday_date = datetime(2023, 10, 23, 10, 30) # Monday
+    # 6. Reserve Objet — cycle jeudi (lundi → ajusté au jeudi suivant)
+    # Lundi 2023-10-23 → prochain jeudi = 2023-10-26
+    monday_date = datetime(2023, 10, 23, 10, 30)
     res_data = {
         "objet_id": objet_id,
         "lieu_id": lieu.id,
-        "date_debut": monday_date.isoformat()
+        "date_debut": monday_date.isoformat(),
+        "nb_semaines": 1,
     }
     res = client.post("/reservations", json=res_data, headers=user_headers)
     if res.status_code != 200:
         print(res.json())
     assert res.status_code == 200
 
-    # Verify the reservation dates were correctly calculated
     reservation = res.json()
     reservation_id = reservation["id"]
 
-    # Wednesday 2023-10-25 10:30:00
-    expected_start = "2023-10-25T10:30:00"
-    # Tuesday 2023-10-31 22:00:00
-    expected_end = "2023-10-31T22:00:00"
-
-    assert reservation["date_debut"] == expected_start
-    assert reservation["date_fin"] == expected_end
+    # Jeudi 2023-10-26 ; fin = mercredi 2023-11-01 22:00
+    assert reservation["date_debut"].startswith("2023-10-26"), reservation["date_debut"]
+    assert reservation["date_fin"] == "2023-11-01T22:00:00", reservation["date_fin"]
 
     # 7. Check Availability (Should be 0 now)
-    # Note: list_objets logic checks if quantite > active reservations
-    # Our reservation is active for the same date check window.
-    # So if we query availability on the same Monday date, it will check the window [Wednesday, next Tuesday]
     res = client.get(f"/objets?available=true&date_check={monday_date.isoformat()}")
-    # Should be empty because quantity is 1 and 1 is reserved in that window
     assert res.status_code == 200
     assert len(res.json()) == 0
 

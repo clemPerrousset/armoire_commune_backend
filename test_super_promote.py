@@ -1,31 +1,12 @@
 from fastapi.testclient import TestClient
-from sqlmodel import Session, SQLModel, create_engine
 from main import app
-from database import get_session
 from models import User
 from auth import get_password_hash
 import pytest
 import os
-from sqlalchemy.pool import StaticPool
 
-# Setup in-memory DB
-sqlite_url = "sqlite://"
-connect_args = {"check_same_thread": False}
-engine = create_engine(sqlite_url, connect_args=connect_args, poolclass=StaticPool)
-
-def get_session_override():
-    with Session(engine) as session:
-        yield session
-
-app.dependency_overrides[get_session] = get_session_override
+# conftest.py gère l'engine de test et la fixture session
 client = TestClient(app)
-
-@pytest.fixture(name="session")
-def session_fixture():
-    SQLModel.metadata.create_all(engine)
-    with Session(engine) as session:
-        yield session
-    SQLModel.metadata.drop_all(engine)
 
 def test_super_promote_success(session, monkeypatch):
     # Mock environment variable

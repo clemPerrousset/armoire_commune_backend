@@ -1,338 +1,259 @@
-# armoire_commune_backend
-l'application de partage d'objet à Dijon !
+# L'Armoire Commune — Backend API
 
-## Installation et Déploiement
+API REST pour la gestion du partage d'objets communautaires à Dijon.
 
-### Déploiement avec Docker (Recommandé)
+## Installation et déploiement
 
-Cette méthode est recommandée pour le déploiement sur serveur ou pour lancer l'application rapidement sans gérer les dépendances Python manuellement.
+### Docker (recommandé)
 
-**Prérequis :**
-- Docker
-- Docker Compose
+```bash
+cp .env.example .env        # configurer SECRET_KEY et superUserPassword
+docker-compose up -d --build
+```
 
-**Étapes :**
+L'API est exposée sur le port **80** : `http://localhost`
 
-1.  **Configurer les variables d'environnement** :
-    Copiez le fichier d'exemple et modifiez-le si nécessaire (notamment la `SECRET_KEY`).
-    ```bash
-    cp .env.example .env
-    ```
+Les données sont persistées dans `./data`.
 
-2.  **Lancer l'application** :
-    ```bash
-    docker-compose up -d --build
-    ```
-    L'option `-d` lance le conteneur en arrière-plan.
+### Développement local
 
-3.  **Accéder à l'application** :
-    L'API sera accessible sur le port **80** de votre machine : `http://localhost` (ou l'IP de votre serveur).
+```bash
+pip install -r requirements.txt
+python seed.py          # initialise la BDD avec des données de test
+uvicorn main:app --reload
+```
 
-    *Note : Le conteneur initialise automatiquement la base de données au démarrage.*
-
-**Persistance des données :**
-Les données de la base de données sont stockées de manière persistante dans le dossier `./data` à la racine du projet.
+L'API est accessible sur `http://127.0.0.1:8000`.  
+La documentation interactive est disponible sur `/docs`.
 
 ---
 
-### Développement Local (Sans Docker)
+## Cycle de réservation
 
-Pour le développement ou si vous ne souhaitez pas utiliser Docker.
+- **Retrait** : jeudi ou vendredi au point relais
+- **Retour** : lundi, mardi ou mercredi de la semaine suivante
+- **Durée** : 1, 2 ou 3 semaines (le champ `nb_semaines` est obligatoire)
+- `date_debut` est automatiquement ajustée au **prochain jeudi**
+- `date_fin` est automatiquement calculée : mercredi à 22h00 de la dernière semaine
 
-1.  **Installer les dépendances** :
-    ```bash
-    pip install -r requirements.txt
-    ```
+```
+Jeudi semaine N  ──────────────────────►  Mercredi semaine N+nb_semaines à 22h00
+    Retrait                                            Retour
+```
 
-2.  **Initialiser la base de données** :
-    ```bash
-    python seed.py
-    ```
+---
 
-3.  **Lancer le serveur** :
-    ```bash
-    uvicorn main:app --reload
-    ```
-    L'application sera accessible sur `http://127.0.0.1:8000`.
+## Rôles
 
-## Documentation API
+| Rôle | Capacités |
+|---|---|
+| **Utilisateur** | Consulter, réserver, favoris, historique |
+| **Point Relais** | + Retrait et retour d'objets (périmètre de ses lieux) |
+| **Admin** | Accès complet à toutes les routes |
 
-**Note importante concernant les ports :**
-Les exemples ci-dessous utilisent `http://127.0.0.1:8000`, ce qui correspond à l'installation locale (sans Docker).
-**Si vous utilisez Docker**, l'application est exposée sur le port **80**. Vous devez donc retirer `:8000` des URLs (exemple : `http://127.0.0.1/auth/signup`).
+---
 
-Voici la liste des routes disponibles avec des exemples d'utilisation via `curl`.
+## Tests
+
+```bash
+pytest -v
+```
+
+Les tests utilisent une base SQLite en mémoire (`conftest.py`). Chaque test repart d'un état vide.
+
+Fichiers de tests :
+- `test_app.py` — flux complet (auth, création, réservation, retour, recherche)
+- `test_reservations.py` — cycle jeudi, multi-semaines, chevauchement, annulation, historique, filtres admin
+- `test_late_returns.py` — gestion des retards (extension / alerte)
+- `test_auth.py`, `test_favoris.py`, `test_historique.py`, `test_lieux.py`, `test_tags.py`, `test_point_relais.py`, `test_super_promote.py`
+
+---
+
+## Référence API
+
+> Les exemples utilisent `http://127.0.0.1:8000` (local). Remplacez par `http://localhost` en Docker.
 
 ### Authentification
 
-#### Inscription
 ```bash
+# Inscription
 curl -X POST "http://127.0.0.1:8000/auth/signup" \
--H "Content-Type: application/json" \
--d '{
-  "nom": "Dupont",
-  "prenom": "Jean",
-  "email": "jean@exemple.com",
-  "password": "monSuperMotDePasse",
-  "association_id": 1
-}'
-```
+  -H "Content-Type: application/json" \
+  -d '{"nom":"Dupont","prenom":"Jean","email":"jean@exemple.com","password":"monPass"}'
 
-#### Connexion (Login)
-Récupère un token d'accès (JWT).
-```bash
+# Connexion — retourne un JWT Bearer
 curl -X POST "http://127.0.0.1:8000/auth/login" \
--H "Content-Type: application/x-www-form-urlencoded" \
--d "username=jean@exemple.com&password=monSuperMotDePasse"
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=jean@exemple.com&password=monPass"
 ```
 
-#### Mon profil
-Récupère les informations de l'utilisateur connecté.
-```bash
-curl -X GET "http://127.0.0.1:8000/users/me" \
--H "Authorization: Bearer VOTRE_TOKEN_USER"
-```
-
-#### Historique des objets consultés
-Récupère la liste des objets que l'utilisateur a consultés, triés du plus récent au plus ancien.
-```bash
-curl -X GET "http://127.0.0.1:8000/users/historique" \
--H "Authorization: Bearer VOTRE_TOKEN_USER"
-```
-
-#### Liste des favoris
-Récupère la liste des objets favoris de l'utilisateur.
-```bash
-curl -X GET "http://127.0.0.1:8000/users/favoris" \
--H "Authorization: Bearer VOTRE_TOKEN_USER"
-```
-
-#### Ajouter un objet aux favoris
-```bash
-curl -X POST "http://127.0.0.1:8000/users/favoris/1" \
--H "Authorization: Bearer VOTRE_TOKEN_USER"
-```
-
-#### Retirer un objet des favoris
-```bash
-curl -X DELETE "http://127.0.0.1:8000/users/favoris/1" \
--H "Authorization: Bearer VOTRE_TOKEN_USER"
-```
-
-
-### Utilisateurs (Admin)
-
-#### Assigner un Lieu à un Point Relais
-Permet à un administrateur d'assigner un `Lieu` à un utilisateur de type `point_relais` pour qu'il puisse scanner des objets à ce lieu.
-```bash
-curl -X POST "http://127.0.0.1:8000/admin/users/2/lieux/1" -H "Authorization: Bearer VOTRE_TOKEN_ADMIN"
-```
-
-#### Retirer un Lieu d'un Point Relais
-```bash
-curl -X DELETE "http://127.0.0.1:8000/admin/users/2/lieux/1" -H "Authorization: Bearer VOTRE_TOKEN_ADMIN"
-```
-
-#### Promouvoir un administrateur
-Nécessite un token Admin.
-```bash
-curl -X PUT "http://127.0.0.1:8000/admin/users/2/promote?is_admin=true" \
--H "Authorization: Bearer VOTRE_TOKEN_ADMIN"
-```
-
-#### Promouvoir un administrateur (Super User)
-Utilise le mot de passe super utilisateur défini dans les variables d'environnement (`superUserPassword`).
-Ceci est utile pour le bootstrapping ou l'accès d'urgence.
+### Profil utilisateur
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/admin/users/2/super-promote" \
--H "Content-Type: application/json" \
--d '{
-  "password": "VOTRE_SUPER_USER_PASSWORD",
-  "is_admin": true
-}'
-```
+curl "http://127.0.0.1:8000/users/me" -H "Authorization: Bearer TOKEN"
 
-### Métadonnées (Admin)
-
-#### Créer une Association
-```bash
-curl -X POST "http://127.0.0.1:8000/admin_meta/associations" \
--H "Authorization: Bearer VOTRE_TOKEN_ADMIN" \
--H "Content-Type: application/json" \
--d '{
-  "nom": "Ma Super Asso",
-  "lat": 47.3220,
-  "long": 5.0415,
-  "description": "Association locale"
-}'
-```
-
-#### Lister les Associations (Public)
-```bash
-curl -X GET "http://127.0.0.1:8000/admin_meta/associations"
-```
-
-#### Créer un Tag
-```bash
-curl -X POST "http://127.0.0.1:8000/admin_meta/tags" \
--H "Authorization: Bearer VOTRE_TOKEN_ADMIN" \
--H "Content-Type: application/json" \
--d '{"nom": "Bricolage"}'
-```
-
-#### Lister les Tags (Public)
-```bash
-curl -X GET "http://127.0.0.1:8000/admin_meta/tags"
-```
-
-#### Supprimer un Tag
-```bash
-curl -X DELETE "http://127.0.0.1:8000/admin_meta/tags/1" \
--H "Authorization: Bearer VOTRE_TOKEN_ADMIN"
-```
-
-#### Créer un Lieu
-```bash
-curl -X POST "http://127.0.0.1:8000/admin_meta/lieux" \
--H "Authorization: Bearer VOTRE_TOKEN_ADMIN" \
--H "Content-Type: application/json" \
--d '{
-  "nom": "La Ressourcerie",
-  "lat": 47.3220,
-  "long": 5.0415,
-  "adresse": "123 Rue de Dijon"
-}'
-```
-
-#### Lister les Lieux (Public)
-```bash
-curl -X GET "http://127.0.0.1:8000/admin_meta/lieux"
-```
-
-#### Supprimer un Lieu
-```bash
-curl -X DELETE "http://127.0.0.1:8000/admin_meta/lieux/1" \
--H "Authorization: Bearer VOTRE_TOKEN_ADMIN"
-```
-
-#### Créer un Consommable
-```bash
-curl -X POST "http://127.0.0.1:8000/admin_meta/consommables" \
--H "Authorization: Bearer VOTRE_TOKEN_ADMIN" \
--H "Content-Type: application/json" \
--d '{
-  "nom": "Vis à bois",
-  "description": "Boite de 50",
-  "quantite": 100,
-  "prix": 5.50
-}'
+# Favoris
+curl "http://127.0.0.1:8000/users/favoris" -H "Authorization: Bearer TOKEN"
+curl -X POST "http://127.0.0.1:8000/users/favoris/1" -H "Authorization: Bearer TOKEN"
+curl -X DELETE "http://127.0.0.1:8000/users/favoris/1" -H "Authorization: Bearer TOKEN"
 ```
 
 ### Objets
 
-#### Rechercher un Objet par nom (Public)
-Recherche partielle et insensible à la casse, idéale pour une barre de recherche "live".
-Le paramètre `available=false` permet de récupérer tous les objets correspondants, même s'ils sont actuellement réservés.
 ```bash
-curl -X GET "http://127.0.0.1:8000/objets?nom=perceuse&available=false"
-```
+# Liste (sans filtre = tous les objets, y compris réservés)
+curl "http://127.0.0.1:8000/objets"
 
-#### Créer un Objet (Admin)
-```bash
+# Uniquement disponibles la semaine prochaine
+curl "http://127.0.0.1:8000/objets?available=true"
+
+# Filtres cumulables : nom (recherche partielle), tag_id, available, date_check
+curl "http://127.0.0.1:8000/objets?nom=perceuse&tag_id=2&available=true"
+
+# Détail
+curl "http://127.0.0.1:8000/objets/1"
+
+# Créer (admin) — sans champ quantite
 curl -X POST "http://127.0.0.1:8000/objets" \
--H "Authorization: Bearer VOTRE_TOKEN_ADMIN" \
--H "Content-Type: application/json" \
--d '{
-  "nom": "Perceuse à percussion",
-  "description": "Puissante, filaire",
-  "quantite": 2,
-  "tag_id": 1,
-  "association_id": 1,
-  "consommable_ids": [1],
-  "disponibilite_globale": true
-}'
-```
+  -H "Authorization: Bearer TOKEN_ADMIN" \
+  -H "Content-Type: application/json" \
+  -d '{"nom":"Perceuse","description":"Filaire","tag_id":1,"consommable_ids":[]}'
 
-#### Lister les objets (Public)
-Filtres disponibles : `nom`, `tag_id`, `available` (bool).
-```bash
-# Tous les objets
-curl -X GET "http://127.0.0.1:8000/objets"
+# Supprimer (admin) — refusé si réservation active ou en cours
+curl -X DELETE "http://127.0.0.1:8000/admin/objets/1" -H "Authorization: Bearer TOKEN_ADMIN"
 
-# Objets disponibles uniquement (vérifie le stock vs réservations en cours)
-curl -X GET "http://127.0.0.1:8000/objets?available=true"
-```
-
-#### Changer la disponibilité technique d'un objet (Admin)
-Pour marquer un objet comme cassé/en réparation.
-```bash
+# Marquer indisponible (maintenance)
 curl -X PUT "http://127.0.0.1:8000/admin/objets/1/available?available=false" \
--H "Authorization: Bearer VOTRE_TOKEN_ADMIN"
-```
+  -H "Authorization: Bearer TOKEN_ADMIN"
 
-#### Réinitialiser l'alerte d'un objet (Admin)
-Pour remettre à `false` l'alerte sur un objet qui n'avait pas été rendu à temps.
-```bash
+# Effacer une alerte de retard
 curl -X POST "http://127.0.0.1:8000/admin/objets/1/clear-alert" \
--H "Authorization: Bearer VOTRE_TOKEN_ADMIN"
-```
+  -H "Authorization: Bearer TOKEN_ADMIN"
 
-
-### Objets (Scan Point Relais)
-
-Ces routes sont réservées aux utilisateurs ayant le rôle `is_point_relais` (ou `is_admin`) pour scanner les QR codes des objets.
-
-#### Retirer un Objet (Scan "Retrait")
-Marque une réservation `active` pour cet objet à l'un des lieux assignés au point relais comme `en_cours` (l'utilisateur est venu chercher l'objet).
-```bash
-curl -X POST "http://127.0.0.1:8000/objets/1/retirer" \
--H "Authorization: Bearer VOTRE_TOKEN_POINT_RELAIS"
-```
-
-#### Retourner un Objet (Scan "Retour")
-Termine la réservation `en_cours` ou `active` pour cet objet, et met à jour sa localisation physique (`current_lieu_id`) au lieu où le point relais effectue le scan. Le `lieu_id` doit être un lieu assigné au point relais.
-```bash
-curl -X POST "http://127.0.0.1:8000/objets/1/retourner?lieu_id=1" -H "Authorization: Bearer VOTRE_TOKEN_POINT_RELAIS"
+# Objets en alerte (admin)
+curl "http://127.0.0.1:8000/admin/objets/alerts" -H "Authorization: Bearer TOKEN_ADMIN"
 ```
 
 ### Réservations
 
-#### Créer une réservation (User)
-Réserve pour 7 jours à partir de la date donnée.
 ```bash
+# Créer (date_debut est ajustée au prochain jeudi automatiquement)
 curl -X POST "http://127.0.0.1:8000/reservations" \
--H "Authorization: Bearer VOTRE_TOKEN_USER" \
--H "Content-Type: application/json" \
--d '{
-  "objet_id": 1,
-  "lieu_id": 1,
-  "date_debut": "2023-10-27T10:00:00"
-}'
-```
+  -H "Authorization: Bearer TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"objet_id":1,"lieu_id":1,"date_debut":"2025-01-06T10:00:00","nb_semaines":2}'
 
-#### Mes réservations (User)
-```bash
-curl -X GET "http://127.0.0.1:8000/reservations/me" \
--H "Authorization: Bearer VOTRE_TOKEN_USER"
-```
+# Mes réservations actives / en cours (avec objet et lieu imbriqués)
+curl "http://127.0.0.1:8000/reservations/me" -H "Authorization: Bearer TOKEN"
 
-#### Toutes les réservations (Admin)
-```bash
-curl -X GET "http://127.0.0.1:8000/admin/reservations" \
--H "Authorization: Bearer VOTRE_TOKEN_ADMIN"
-```
+# Historique : réservations terminées (avec objet et lieu imbriqués)
+curl "http://127.0.0.1:8000/reservations/historique" -H "Authorization: Bearer TOKEN"
 
-#### Retourner un objet (Admin)
-Marque la réservation comme terminée.
-```bash
+# Annuler une réservation (statut active seulement)
+curl -X POST "http://127.0.0.1:8000/reservations/1/cancel" -H "Authorization: Bearer TOKEN"
+
+# Calendrier d'un objet (semaines réservées)
+curl "http://127.0.0.1:8000/reservations/objet/1"
+
+# Toutes les réservations — filtre optionnel par statut (admin)
+curl "http://127.0.0.1:8000/admin/reservations?status=active" -H "Authorization: Bearer TOKEN_ADMIN"
+# statuts disponibles : active, en_cours, terminee, annulee
+
+# Marquer comme retourné (admin)
 curl -X POST "http://127.0.0.1:8000/admin/reservations/1/return" \
--H "Authorization: Bearer VOTRE_TOKEN_ADMIN"
+  -H "Authorization: Bearer TOKEN_ADMIN"
+
+# Vérifier les retards (admin)
+curl -X POST "http://127.0.0.1:8000/admin/reservations/check-late" \
+  -H "Authorization: Bearer TOKEN_ADMIN"
 ```
 
-#### Vérifier les retards de réservations (Admin)
-Repousse d'une semaine la réservation si l'objet n'est pas réservé derrière, ou passe l'objet en `alert=true` s'il est réservé.
+### Métadonnées (tags, lieux, consommables)
+
 ```bash
-curl -X POST "http://127.0.0.1:8000/admin/reservations/check-late" \
--H "Authorization: Bearer VOTRE_TOKEN_ADMIN"
+# Tags
+curl "http://127.0.0.1:8000/admin_meta/tags"
+curl -X POST "http://127.0.0.1:8000/admin_meta/tags" \
+  -H "Authorization: Bearer TOKEN_ADMIN" -d '{"nom":"Jardinage"}'
+curl -X DELETE "http://127.0.0.1:8000/admin_meta/tags/1" -H "Authorization: Bearer TOKEN_ADMIN"
+
+# Lieux (avec champ description pour les horaires)
+curl "http://127.0.0.1:8000/admin_meta/lieux"
+curl -X POST "http://127.0.0.1:8000/admin_meta/lieux" \
+  -H "Authorization: Bearer TOKEN_ADMIN" \
+  -H "Content-Type: application/json" \
+  -d '{"nom":"LAC","lat":47.32,"long":5.04,"adresse":"1 rue LAC","description":"Lun-Ven 9h-18h"}'
+curl -X DELETE "http://127.0.0.1:8000/admin_meta/lieux/1" -H "Authorization: Bearer TOKEN_ADMIN"
+
+# Consommables
+curl "http://127.0.0.1:8000/admin_meta/consommables"
+curl -X POST "http://127.0.0.1:8000/admin_meta/consommables" \
+  -H "Authorization: Bearer TOKEN_ADMIN" \
+  -d '{"nom":"Piles AA","description":"Pack 4","quantite":10,"prix":3.50}'
 ```
+
+### Gestion des utilisateurs (admin)
+
+```bash
+# Promouvoir admin
+curl -X PUT "http://127.0.0.1:8000/admin/users/2/promote?is_admin=true" \
+  -H "Authorization: Bearer TOKEN_ADMIN"
+
+# Promouvoir point relais
+curl -X PUT "http://127.0.0.1:8000/admin/users/2/promote-point-relais?is_point_relais=true" \
+  -H "Authorization: Bearer TOKEN_ADMIN"
+
+# Assigner un lieu à un point relais
+curl -X POST "http://127.0.0.1:8000/admin/users/2/lieux/1" \
+  -H "Authorization: Bearer TOKEN_ADMIN"
+
+# Super-promote (bootstrap / urgence)
+curl -X POST "http://127.0.0.1:8000/admin/users/2/super-promote" \
+  -H "Content-Type: application/json" \
+  -d '{"password":"SUPER_USER_PASSWORD","is_admin":true}'
+```
+
+### Opérations Point Relais (scan QR)
+
+```bash
+# Retrait : réservation active → en_cours
+curl -X POST "http://127.0.0.1:8000/objets/1/retirer" \
+  -H "Authorization: Bearer TOKEN_POINT_RELAIS"
+
+# Retour : réservation → terminee, mise à jour du lieu physique
+curl -X POST "http://127.0.0.1:8000/objets/1/retourner?lieu_id=1" \
+  -H "Authorization: Bearer TOKEN_POINT_RELAIS"
+```
+
+---
+
+## Modèles de données
+
+### Objet
+| Champ | Type | Description |
+|---|---|---|
+| `nom` | str | Nom de l'objet |
+| `description` | str | Description |
+| `image` | str? | URL ou base64 |
+| `disponibilite_globale` | bool | False = en maintenance/panne |
+| `alert` | bool | True = retard avec conflit de réservation |
+| `tag_id` | int? | Catégorie |
+| `current_lieu_id` | int? | Localisation physique actuelle |
+
+### Reservation
+| Champ | Type | Description |
+|---|---|---|
+| `date_debut` | datetime | Jeudi de début (auto-ajusté) |
+| `date_fin` | datetime | Mercredi à 22h00 de fin |
+| `nb_semaines` | int | Durée : 1, 2 ou 3 |
+| `status` | str | `active` / `en_cours` / `terminee` / `annulee` |
+| `objet` | ObjetBrief | Objet imbriqué dans les réponses |
+| `lieu` | LieuBrief | Lieu imbriqué dans les réponses |
+
+### Lieu
+| Champ | Type | Description |
+|---|---|---|
+| `nom` | str | Nom du point relais |
+| `adresse` | str | Adresse postale |
+| `lat` / `long` | float | Coordonnées GPS |
+| `description` | str? | Horaires d'ouverture ou infos complémentaires |
