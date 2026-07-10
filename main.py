@@ -4,12 +4,15 @@ from database import create_db_and_tables
 from routers import users, admin_meta, objets, reservations
 import os
 
+# Créer le dossier images avant le montage StaticFiles
+# (StaticFiles vérifie l'existence du dossier à l'initialisation, pas au startup)
+os.makedirs("/data/images", exist_ok=True)
+
 app = FastAPI(title="Armoire Commune API")
 
 @app.on_event("startup")
 def on_startup():
     create_db_and_tables()
-    os.makedirs("/data/images", exist_ok=True)
 
 # Serve uploaded object images
 app.mount("/images", StaticFiles(directory="/data/images"), name="images")
