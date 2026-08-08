@@ -4,10 +4,15 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, HTTPException, UploadFile, File
 from sqlmodel import Session, select, SQLModel
 from datetime import datetime, timedelta
+from pydantic import BaseModel
 from PIL import Image
 
 from database import get_session
-from models import Objet, User, Consommable, ObjetConsommableLink, Reservation, UserObjetHistoriqueLink, Lieu, UserLieuLink
+from models import (
+    Objet, User, Consommable, ObjetConsommableLink, Reservation,
+    UserObjetHistoriqueLink, Lieu, UserLieuLink,
+    STATUTS_BLOQUANTS, STATUT_SUIVANT
+)
 from auth import get_current_admin, get_current_user_optional, get_current_point_relais, get_current_user
 
 IMAGE_DIR = "/data/images"
@@ -27,19 +32,63 @@ class ObjetCreate(SQLModel):
     disponibilite_globale: bool = True
 
 
+class ReservationBrief(BaseModel):
+    id: int
+    status: str
+    date_debut: datetime
+    date_fin: datetime
+    nb_semaines: int
+    user_id: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ObjetWithReservation(BaseModel):
+    """Objet avec sa réservation courante — utilisé pour la liste de vérification."""
+    id: Optional[int]
+    nom: str
+    description: str
+    image: Optional[str] = None
+    disponibilite_globale: bool
+    reservation: Optional[ReservationBrief] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ScanResult(BaseModel):
+    objet_id: int
+    objet_nom: str
+    ancien_statut: str
+    nouveau_statut: str
+    reservation_id: Optional[int] = None
+    verification_requise: bool = False  # True quand on atteint en_verification
+
+
 def _next_thursday(reference: datetime) -> datetime:
     days_ahead = (3 - reference.weekday()) % 7
     return reference + timedelta(days=days_ahead)
 
 
 def _is_available_for_week(obj: Objet, date_debut: datetime, date_fin: datetime) -> bool:
-    """Retourne True si aucune réservation active/en_cours ne chevauche la plage."""
     for res in obj.reservations:
-        if res.status in ("active", "en_cours"):
+        if res.status in STATUTS_BLOQUANTS:
             if res.date_debut < date_fin and res.date_fin > date_debut:
                 return False
     return True
 
+
+def _get_reservation_active(objet_id: int, session: Session) -> Optional[Reservation]:
+    return session.exec(
+        select(Reservation).where(
+            Reservation.objet_id == objet_id,
+            Reservation.status.in_(STATUTS_BLOQUANTS)
+        )
+    ).first()
+
+
+# --- CRUD Objets ---
 
 @router.post("/objets", response_model=Objet)
 def create_objet(
@@ -66,7 +115,6 @@ def create_objet(
 def list_objets(
     nom: Optional[str] = None,
     tag_id: Optional[int] = None,
-    # available=False → tous les objets ; available=True → uniquement les disponibles cette semaine
     available: bool = Query(False, description="True = uniquement disponibles, False = tous"),
     date_check: Optional[datetime] = None,
     session: Session = Depends(get_session)
@@ -82,7 +130,6 @@ def list_objets(
     if not available:
         return objets
 
-    # Filtrage par dispo sur la prochaine semaine de retrait (jeudi→mercredi)
     if not date_check:
         date_check = datetime.now()
 
@@ -112,17 +159,17 @@ def get_objet(
             UserObjetHistoriqueLink.objet_id == objet_id
         )
         historique_link = session.exec(statement).first()
-
         if historique_link:
             historique_link.date_consultation = datetime.utcnow()
         else:
             historique_link = UserObjetHistoriqueLink(user_id=current_user.id, objet_id=objet_id)
-
         session.add(historique_link)
         session.commit()
 
     return obj
 
+
+# --- Admin CRUD ---
 
 @router.delete("/admin/objets/{objet_id}")
 def delete_objet(
@@ -134,13 +181,9 @@ def delete_objet(
     if not obj:
         raise HTTPException(status_code=404, detail="Objet not found")
 
-    # Vérification : aucune réservation active ou en cours
-    active_reservations = [r for r in obj.reservations if r.status in ("active", "en_cours")]
-    if active_reservations:
-        raise HTTPException(
-            status_code=400,
-            detail="Impossible de supprimer un objet avec des réservations actives ou en cours"
-        )
+    active = [r for r in obj.reservations if r.status in STATUTS_BLOQUANTS]
+    if active:
+        raise HTTPException(status_code=400, detail="Impossible de supprimer un objet avec des réservations actives")
 
     session.delete(obj)
     session.commit()
@@ -172,7 +215,6 @@ def clear_objet_alert(
     obj = session.get(Objet, objet_id)
     if not obj:
         raise HTTPException(status_code=404, detail="Objet not found")
-
     obj.alert = False
     session.add(obj)
     session.commit()
@@ -186,13 +228,12 @@ async def upload_objet_image(
     session: Session = Depends(get_session),
     admin: User = Depends(get_current_admin)
 ):
-    """Upload et redimensionne la photo d'un objet (max 500×500, JPEG q=75)."""
     obj = session.get(Objet, objet_id)
     if not obj:
         raise HTTPException(status_code=404, detail="Objet not found")
 
     if file.content_type not in ("image/jpeg", "image/png", "image/webp", "image/gif"):
-        raise HTTPException(status_code=400, detail="Format non supporté — utilisez JPEG, PNG ou WebP")
+        raise HTTPException(status_code=400, detail="Format non supporté")
 
     raw = await file.read()
     img = Image.open(io.BytesIO(raw)).convert("RGB")
@@ -209,14 +250,166 @@ async def upload_objet_image(
     return {"image_url": obj.image}
 
 
+# --- Alertes (objets en retard) ---
+
 @router.get("/admin/objets/alerts", response_model=List[Objet])
-def list_objets_en_alerte(
+def list_objets_en_retard(
     session: Session = Depends(get_session),
     admin: User = Depends(get_current_admin)
 ):
-    """Liste des objets ayant une alerte de retard active."""
-    return session.exec(select(Objet).where(Objet.alert == True)).all()
+    """Objets dont la réservation est en retard (date_fin dépassée, pas encore restitués)."""
+    now = datetime.now()
+    late_reservations = session.exec(
+        select(Reservation).where(
+            Reservation.status.in_(["en_preparation", "mis_a_disposition", "retire"]),
+            Reservation.date_fin < now
+        )
+    ).all()
 
+    objet_ids = list({r.objet_id for r in late_reservations if r.objet_id})
+    if not objet_ids:
+        return []
+
+    return session.exec(select(Objet).where(Objet.id.in_(objet_ids))).all()
+
+
+# --- QR Scan : avancement du statut ---
+
+@router.post("/objets/{objet_id}/scan", response_model=ScanResult)
+def scan_objet(
+    objet_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_point_relais)
+):
+    """
+    Scan du QR code d'un objet par un admin ou point_relais.
+    Avance le statut de la réservation active au statut suivant.
+    """
+    obj = session.get(Objet, objet_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Objet not found")
+
+    reservation = _get_reservation_active(objet_id, session)
+    if not reservation:
+        raise HTTPException(status_code=404, detail="Aucune réservation active pour cet objet")
+
+    ancien_statut = reservation.status
+    if ancien_statut not in STATUT_SUIVANT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Statut '{ancien_statut}' ne peut pas être avancé par scan"
+        )
+
+    nouveau_statut = STATUT_SUIVANT[ancien_statut]
+    reservation.status = nouveau_statut
+    session.add(reservation)
+    session.commit()
+
+    return ScanResult(
+        objet_id=objet_id,
+        objet_nom=obj.nom,
+        ancien_statut=ancien_statut,
+        nouveau_statut=nouveau_statut,
+        reservation_id=reservation.id,
+        verification_requise=(nouveau_statut == "en_verification"),
+    )
+
+
+# --- Vérification admin ---
+
+@router.get("/admin/objets/verification", response_model=List[ObjetWithReservation])
+def list_objets_a_verifier(
+    session: Session = Depends(get_session),
+    admin: User = Depends(get_current_admin)
+):
+    """Objets dont la réservation est en statut 'en_verification' — à valider par l'admin."""
+    reservations = session.exec(
+        select(Reservation).where(Reservation.status == "en_verification")
+    ).all()
+
+    result = []
+    for res in reservations:
+        obj = session.get(Objet, res.objet_id)
+        if obj:
+            result.append(ObjetWithReservation(
+                id=obj.id,
+                nom=obj.nom,
+                description=obj.description,
+                image=obj.image,
+                disponibilite_globale=obj.disponibilite_globale,
+                reservation=ReservationBrief(
+                    id=res.id,
+                    status=res.status,
+                    date_debut=res.date_debut,
+                    date_fin=res.date_fin,
+                    nb_semaines=res.nb_semaines,
+                    user_id=res.user_id,
+                )
+            ))
+    return result
+
+
+@router.post("/admin/objets/{objet_id}/valider")
+def valider_objet(
+    objet_id: int,
+    session: Session = Depends(get_session),
+    admin: User = Depends(get_current_admin)
+):
+    """Valide un objet en_verification → le remet en stock disponible."""
+    obj = session.get(Objet, objet_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Objet not found")
+
+    reservation = session.exec(
+        select(Reservation).where(
+            Reservation.objet_id == objet_id,
+            Reservation.status == "en_verification"
+        )
+    ).first()
+
+    if not reservation:
+        raise HTTPException(status_code=404, detail="Aucune réservation en_verification pour cet objet")
+
+    reservation.status = "terminee"
+    session.add(reservation)
+
+    obj.disponibilite_globale = True
+    session.add(obj)
+    session.commit()
+
+    return {"message": f"Objet '{obj.nom}' validé et remis en stock", "objet_id": objet_id}
+
+
+@router.post("/admin/objets/{objet_id}/mettre-en-maintenance")
+def mettre_en_maintenance(
+    objet_id: int,
+    session: Session = Depends(get_session),
+    admin: User = Depends(get_current_admin)
+):
+    """Met un objet en maintenance (indisponible) après vérification."""
+    obj = session.get(Objet, objet_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Objet not found")
+
+    reservation = session.exec(
+        select(Reservation).where(
+            Reservation.objet_id == objet_id,
+            Reservation.status == "en_verification"
+        )
+    ).first()
+
+    if reservation:
+        reservation.status = "terminee"
+        session.add(reservation)
+
+    obj.disponibilite_globale = False
+    session.add(obj)
+    session.commit()
+
+    return {"message": f"Objet '{obj.nom}' mis en maintenance", "objet_id": objet_id}
+
+
+# --- Retrait / Retour (legacy, maintenant géré via scan) ---
 
 @router.post("/objets/{objet_id}/retirer")
 def retirer_objet(
@@ -228,11 +421,10 @@ def retirer_objet(
     if not obj:
         raise HTTPException(status_code=404, detail="Objet not found")
 
-    # Les admins peuvent opérer sur tous les lieux ; les point_relais sont limités aux leurs
     if current_user.is_admin:
         statement = select(Reservation).where(
             Reservation.objet_id == objet_id,
-            Reservation.status == "active",
+            Reservation.status == "mis_a_disposition",
         )
     else:
         user_lieux_ids = [lieu.id for lieu in current_user.lieux]
@@ -240,15 +432,15 @@ def retirer_objet(
             raise HTTPException(status_code=403, detail="Aucun lieu associé à ce point relais")
         statement = select(Reservation).where(
             Reservation.objet_id == objet_id,
-            Reservation.status == "active",
+            Reservation.status == "mis_a_disposition",
             Reservation.lieu_id.in_(user_lieux_ids)
         )
 
     reservation = session.exec(statement).first()
     if not reservation:
-        raise HTTPException(status_code=404, detail="Aucune réservation active trouvée pour cet objet")
+        raise HTTPException(status_code=404, detail="Aucune réservation mis_a_disposition pour cet objet")
 
-    reservation.status = "en_cours"
+    reservation.status = "retire"
     session.add(reservation)
     session.commit()
 
@@ -266,7 +458,6 @@ def retourner_objet(
     if not obj:
         raise HTTPException(status_code=404, detail="Objet not found")
 
-    # Les admins peuvent retourner à n'importe quel lieu
     if not current_user.is_admin:
         user_lieux_ids = [lieu.id for lieu in current_user.lieux]
         if lieu_id not in user_lieux_ids:
@@ -274,20 +465,16 @@ def retourner_objet(
 
     statement = select(Reservation).where(
         Reservation.objet_id == objet_id,
-        Reservation.status.in_(["en_cours", "active"])
+        Reservation.status.in_(["retire", "mis_a_disposition"])
     )
     reservation = session.exec(statement).first()
 
     if reservation:
-        reservation.status = "terminee"
+        reservation.status = "restitue"
         session.add(reservation)
 
     obj.current_lieu_id = lieu_id
     session.add(obj)
     session.commit()
 
-    msg = "Objet retourné"
-    if reservation:
-        msg += f" (réservation {reservation.id} terminée)"
-
-    return {"message": msg, "objet_id": obj.id, "current_lieu_id": lieu_id}
+    return {"message": "Objet retourné", "objet_id": obj.id, "current_lieu_id": lieu_id}

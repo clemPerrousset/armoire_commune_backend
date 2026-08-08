@@ -27,6 +27,10 @@ class UserRead(BaseModel):
     is_admin: bool
     is_point_relais: bool
     association_id: Optional[int] = None
+    credits: int = 100
+
+    class Config:
+        from_attributes = True
 
 class Token(BaseModel):
     access_token: str

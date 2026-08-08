@@ -2,7 +2,6 @@ from typing import Optional, List
 from sqlmodel import Field, SQLModel, Relationship
 from datetime import datetime
 
-# Link Table for Many-to-Many between Objet and Consommable
 class ObjetConsommableLink(SQLModel, table=True):
     objet_id: Optional[int] = Field(default=None, foreign_key="objet.id", primary_key=True)
     consommable_id: Optional[int] = Field(default=None, foreign_key="consommable.id", primary_key=True)
@@ -15,7 +14,6 @@ class UserObjetHistoriqueLink(SQLModel, table=True):
     user_id: Optional[int] = Field(default=None, foreign_key="user.id", primary_key=True)
     objet_id: Optional[int] = Field(default=None, foreign_key="objet.id", primary_key=True)
     date_consultation: datetime = Field(default_factory=datetime.utcnow)
-
 
 class UserLieuLink(SQLModel, table=True):
     user_id: Optional[int] = Field(default=None, foreign_key="user.id", primary_key=True)
@@ -40,6 +38,10 @@ class User(SQLModel, table=True):
     is_admin: bool = Field(default=False)
     is_point_relais: bool = Field(default=False)
 
+    # Crédits : 100 par an, 1 déduit par semaine réservée
+    credits: int = Field(default=100)
+    credits_reset_date: Optional[datetime] = Field(default=None)
+
     association_id: Optional[int] = Field(default=None, foreign_key="association.id")
     association: Optional[Association] = Relationship(back_populates="users")
 
@@ -53,7 +55,6 @@ class Lieu(SQLModel, table=True):
     lat: float
     long: float
     adresse: str
-    # Horaires d'ouverture ou informations complémentaires sur le lieu
     description: Optional[str] = Field(default=None)
 
     users: List["User"] = Relationship(back_populates="lieux", link_model=UserLieuLink)
@@ -76,10 +77,8 @@ class Objet(SQLModel, table=True):
     nom: str
     description: str
     image: Optional[str] = None
-    # quantite supprimée : 1 fiche = 1 calendrier
-    disponibilite_globale: bool = Field(default=True)  # False si en maintenance/panne
-
-    alert: bool = Field(default=False)  # True si retard avec prochaine réservation
+    disponibilite_globale: bool = Field(default=True)
+    alert: bool = Field(default=False)
 
     current_lieu_id: Optional[int] = Field(default=None, foreign_key="lieu.id", ondelete="SET NULL")
     current_lieu: Optional[Lieu] = Relationship()
@@ -96,12 +95,25 @@ class Objet(SQLModel, table=True):
     favoris_par: List[User] = Relationship(back_populates="favoris", link_model=UserObjetFavorisLink)
     consulte_par: List[User] = Relationship(back_populates="historique", link_model=UserObjetHistoriqueLink)
 
+# Statuts de réservation (flux complet) :
+# en_preparation → mis_a_disposition → retire → restitue → en_verification → terminee
+# annulee : annulation avant retrait
+STATUTS_BLOQUANTS = ["en_preparation", "mis_a_disposition", "retire", "restitue", "en_verification"]
+STATUTS_EN_COURS = ["en_preparation", "mis_a_disposition", "retire", "restitue", "en_verification"]
+
+STATUT_SUIVANT = {
+    "en_preparation": "mis_a_disposition",
+    "mis_a_disposition": "retire",
+    "retire": "restitue",
+    "restitue": "en_verification",
+}
+
 class Reservation(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     date_debut: datetime
     date_fin: datetime
-    status: str = "active"  # active, en_cours, terminee, annulee
-    nb_semaines: int = Field(default=1)  # Durée demandée par l'utilisateur (1, 2 ou 3)
+    status: str = "en_preparation"
+    nb_semaines: int = Field(default=1)
 
     user_id: Optional[int] = Field(default=None, foreign_key="user.id")
     user: Optional[User] = Relationship()
