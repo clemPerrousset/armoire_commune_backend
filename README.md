@@ -174,8 +174,8 @@ curl -X POST "http://127.0.0.1:8000/reservations/1/cancel" -H "Authorization: Be
 curl "http://127.0.0.1:8000/reservations/objet/1"
 
 # Toutes les réservations — filtre optionnel par statut (admin)
-curl "http://127.0.0.1:8000/admin/reservations?status=active" -H "Authorization: Bearer TOKEN_ADMIN"
-# statuts disponibles : active, en_cours, terminee, annulee
+curl "http://127.0.0.1:8000/admin/reservations?status=mis_a_disposition" -H "Authorization: Bearer TOKEN_ADMIN"
+# statuts disponibles : en_preparation, mis_a_disposition, retire, restitue, en_verification, terminee, annulee
 
 # Marquer comme retourné (admin)
 curl -X POST "http://127.0.0.1:8000/admin/reservations/1/return" \
@@ -236,14 +236,49 @@ curl -X POST "http://127.0.0.1:8000/admin/users/super-list-admins" \
   -d '{"password":"SUPER_USER_PASSWORD"}'
 ```
 
-### Opérations Point Relais (scan QR)
+### Cycle de statut d'une réservation
+
+```
+en_preparation → mis_a_disposition → retire → restitue → en_verification → terminee
+```
+(`annulee` en cas d'annulation avant retrait)
+
+### Scan QR (admin ou point relais)
+
+Chaque objet a un QR code (`armoirecommune://objet/{id}`, affiché côté app à
+tous les utilisateurs). Le scanner par un admin/point relais fait avancer
+la réservation active au statut suivant :
 
 ```bash
-# Retrait : réservation active → en_cours
+curl -X POST "http://127.0.0.1:8000/objets/1/scan" \
+  -H "Authorization: Bearer TOKEN_POINT_RELAIS"
+# → {"objet_id":1,"objet_nom":"...","ancien_statut":"en_preparation","nouveau_statut":"mis_a_disposition","reservation_id":5,"verification_requise":false}
+```
+
+Quand `nouveau_statut` devient `en_verification`, `verification_requise` passe
+à `true` : l'objet doit être validé manuellement par un admin avant de
+redevenir disponible (voir ci-dessous).
+
+### Vérification admin (objets retournés)
+
+```bash
+# Liste des objets en attente de vérification (statut en_verification)
+curl "http://127.0.0.1:8000/admin/objets/verification" -H "Authorization: Bearer TOKEN_ADMIN"
+
+# Valider — remet l'objet en stock disponible
+curl -X POST "http://127.0.0.1:8000/admin/objets/1/valider" -H "Authorization: Bearer TOKEN_ADMIN"
+
+# Mettre en maintenance — objet indisponible
+curl -X POST "http://127.0.0.1:8000/admin/objets/1/mettre-en-maintenance" \
+  -H "Authorization: Bearer TOKEN_ADMIN"
+```
+
+### Retrait / retour legacy (pré-QR, toujours actifs mais dépréciés)
+
+```bash
 curl -X POST "http://127.0.0.1:8000/objets/1/retirer" \
   -H "Authorization: Bearer TOKEN_POINT_RELAIS"
 
-# Retour : réservation → terminee, mise à jour du lieu physique
 curl -X POST "http://127.0.0.1:8000/objets/1/retourner?lieu_id=1" \
   -H "Authorization: Bearer TOKEN_POINT_RELAIS"
 ```
