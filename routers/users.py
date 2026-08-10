@@ -37,8 +37,12 @@ class Token(BaseModel):
     token_type: str
 
 class SuperPromoteRequest(BaseModel):
+    email: str
     password: str
     is_admin: bool
+
+class SuperPasswordRequest(BaseModel):
+    password: str
 
 @router.post("/auth/signup", response_model=UserRead)
 def create_user(user: UserCreate, session: Session = Depends(get_session)):
@@ -151,9 +155,8 @@ def promote_user_point_relais(user_id: int, is_point_relais: bool, current_admin
     session.commit()
     return {"message": f"User {user.email} point relais status set to {is_point_relais}"}
 
-@router.post("/admin/users/{user_id}/super-promote")
+@router.post("/admin/users/super-promote")
 def promote_user_super(
-    user_id: int,
     request: SuperPromoteRequest,
     session: Session = Depends(get_session)
 ):
@@ -164,7 +167,7 @@ def promote_user_super(
             detail="Could not validate credentials"
         )
 
-    user = session.get(User, user_id)
+    user = session.exec(select(User).where(User.email == request.email)).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -172,6 +175,21 @@ def promote_user_super(
     session.add(user)
     session.commit()
     return {"message": f"User {user.email} admin status set to {request.is_admin}"}
+
+@router.post("/admin/users/super-list-admins", response_model=List[UserRead])
+def list_admins_super(
+    request: SuperPasswordRequest,
+    session: Session = Depends(get_session)
+):
+    super_password = os.getenv("superUserPassword")
+    if not super_password or request.password != super_password:
+         raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials"
+        )
+
+    admins = session.exec(select(User).where(User.is_admin == True)).all()
+    return admins
 
 
 @router.post("/admin/users/{user_id}/lieux/{lieu_id}")

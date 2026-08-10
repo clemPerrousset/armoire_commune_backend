@@ -207,10 +207,15 @@ curl -X PUT "http://127.0.0.1:8000/admin/users/2/promote-point-relais?is_point_r
 curl -X POST "http://127.0.0.1:8000/admin/users/2/lieux/1" \
   -H "Authorization: Bearer TOKEN_ADMIN"
 
-# Super-promote (bootstrap / urgence)
-curl -X POST "http://127.0.0.1:8000/admin/users/2/super-promote" \
+# Super-promote (bootstrap / urgence) — par email
+curl -X POST "http://127.0.0.1:8000/admin/users/super-promote" \
   -H "Content-Type: application/json" \
-  -d '{"password":"SUPER_USER_PASSWORD","is_admin":true}'
+  -d '{"email":"user@example.com","password":"SUPER_USER_PASSWORD","is_admin":true}'
+
+# Lister les admins (bootstrap / urgence)
+curl -X POST "http://127.0.0.1:8000/admin/users/super-list-admins" \
+  -H "Content-Type: application/json" \
+  -d '{"password":"SUPER_USER_PASSWORD"}'
 ```
 
 ### Opérations Point Relais (scan QR)
