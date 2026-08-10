@@ -1,8 +1,11 @@
 import os
 from sqlmodel import SQLModel, create_engine, Session
 
-sqlite_file_name = "database.db"
-sqlite_url = os.getenv("DATABASE_URL", f"sqlite:///{sqlite_file_name}")
+# Le fallback pointe vers le volume persistant /data (monté par docker-compose)
+# plutôt qu'un chemin relatif au conteneur : si DATABASE_URL n'est pas défini
+# dans .env, on ne veut surtout pas écrire une base éphémère qui disparaît
+# à chaque rebuild.
+sqlite_url = os.getenv("DATABASE_URL", "sqlite:////data/database.db")
 
 connect_args = {"check_same_thread": False}
 engine = create_engine(sqlite_url, echo=True, connect_args=connect_args)

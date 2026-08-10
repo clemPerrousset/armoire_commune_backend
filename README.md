@@ -13,7 +13,24 @@ docker-compose up -d --build
 
 L'API est exposée sur le port **80** : `http://localhost`
 
-Les données sont persistées dans `./data`.
+Les données sont persistées dans `./data` (bind mount — survit à un `docker-compose up -d --build`, seule l'image applicative est reconstruite).
+
+Au démarrage, `entrypoint.sh` exécute dans l'ordre :
+1. **Restauration automatique** — si `./data/database.db` est absent ou vide et qu'un backup existe dans `../db_backups`, le plus récent est restauré avant tout.
+2. **Migration additive** (`migrate.py`) — ajoute les tables/colonnes manquantes déclarées dans les modèles, sans jamais supprimer ni renommer de données. Évite qu'un changement de modèle (ex: nouveau champ) fasse planter le démarrage sur une base déjà peuplée.
+3. **Seed** (`seed.py`) — no-op si un admin existe déjà.
+
+### Sauvegardes automatiques (hors docker)
+
+Un script de sauvegarde à chaud (`scripts/backup_db.py`, via `sqlite3.Connection.backup()`, cohérent même en écriture concurrente) écrit des snapshots horodatés dans `../db_backups` — **en dehors** du dossier `./data` et du repo git, pour survivre à une suppression accidentelle de l'un ou l'autre. Rétention par défaut : 7 jours.
+
+À configurer une fois sur le serveur via `crontab -e` :
+
+```cron
+0 * * * * cd /home/ubuntu/armoire_commune/armoire_commune_backend && /usr/bin/python3 scripts/backup_db.py >> ../db_backups/backup.log 2>&1
+```
+
+Coût négligeable pour une base de cette taille (quelques ms, quelques Ko/backup).
 
 ### Développement local
 
@@ -66,6 +83,7 @@ Fichiers de tests :
 - `test_reservations.py` — cycle jeudi, multi-semaines, chevauchement, annulation, historique, filtres admin
 - `test_late_returns.py` — gestion des retards (extension / alerte)
 - `test_auth.py`, `test_favoris.py`, `test_historique.py`, `test_lieux.py`, `test_tags.py`, `test_point_relais.py`, `test_super_promote.py`
+- `test_migrate.py` — migration additive (colonnes manquantes ajoutées + backfill du DEFAULT, idempotence)
 
 ---
 
