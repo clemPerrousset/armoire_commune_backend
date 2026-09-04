@@ -10,10 +10,11 @@ from PIL import Image
 from database import get_session
 from models import (
     Objet, User, Consommable, ObjetConsommableLink, Reservation,
-    UserObjetHistoriqueLink, Lieu, UserLieuLink,
+    UserObjetHistoriqueLink, Lieu, UserLieuLink, Fermeture,
     STATUTS_BLOQUANTS, STATUT_SUIVANT
 )
 from auth import get_current_admin, get_current_user_optional, get_current_point_relais, get_current_user
+from routers.fermetures import week_end
 
 IMAGE_DIR = "/data/images"
 MAX_SIZE = (500, 500)
@@ -71,11 +72,14 @@ def _next_thursday(reference: datetime) -> datetime:
     return reference + timedelta(days=days_ahead)
 
 
-def _is_available_for_week(obj: Objet, date_debut: datetime, date_fin: datetime) -> bool:
+def _is_available_for_week(obj: Objet, date_debut: datetime, date_fin: datetime, fermetures=None) -> bool:
     for res in obj.reservations:
         if res.status in STATUTS_BLOQUANTS:
             if res.date_debut < date_fin and res.date_fin > date_debut:
                 return False
+    for f in fermetures or []:
+        if f.date_debut < date_fin and week_end(f.date_debut) > date_debut:
+            return False
     return True
 
 
@@ -137,9 +141,11 @@ def list_objets(
     check_end = check_start + timedelta(days=6)
     check_end = check_end.replace(hour=22, minute=0, second=0, microsecond=0)
 
+    fermetures = session.exec(select(Fermeture)).all()
+
     return [
         obj for obj in objets
-        if obj.disponibilite_globale and _is_available_for_week(obj, check_start, check_end)
+        if obj.disponibilite_globale and _is_available_for_week(obj, check_start, check_end, fermetures)
     ]
 
 

@@ -123,3 +123,9 @@ class Reservation(SQLModel, table=True):
 
     lieu_id: Optional[int] = Field(default=None, foreign_key="lieu.id")
     lieu: Optional[Lieu] = Relationship()
+
+
+class Fermeture(SQLModel, table=True):
+    """Semaine de congé admin : bloque tous les objets à la réservation sur cette semaine."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    date_debut: datetime  # Jeudi de début de la semaine fermée

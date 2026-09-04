@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from database import create_db_and_tables
-from routers import users, admin_meta, objets, reservations
+from routers import users, admin_meta, objets, reservations, fermetures
 import os
 
 # Créer le dossier images avant le montage StaticFiles
@@ -21,6 +21,7 @@ app.include_router(users.router)
 app.include_router(admin_meta.router)
 app.include_router(objets.router)
 app.include_router(reservations.router)
+app.include_router(fermetures.router)
 
 @app.get("/")
 def read_root():

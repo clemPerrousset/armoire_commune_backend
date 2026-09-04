@@ -5,8 +5,9 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel
 
 from database import get_session
-from models import Reservation, Objet, User, Lieu, STATUTS_BLOQUANTS, STATUTS_EN_COURS
+from models import Reservation, Objet, User, Lieu, Fermeture, STATUTS_BLOQUANTS, STATUTS_EN_COURS
 from auth import get_current_user, get_current_admin
+from routers.fermetures import week_end
 
 router = APIRouter(tags=["Reservations"])
 
@@ -66,6 +67,14 @@ def _has_overlap(reservations, date_debut: datetime, date_fin: datetime) -> bool
     return False
 
 
+def _overlaps_fermeture(session: Session, date_debut: datetime, date_fin: datetime) -> bool:
+    fermetures = session.exec(select(Fermeture)).all()
+    for f in fermetures:
+        if f.date_debut < date_fin and week_end(f.date_debut) > date_debut:
+            return True
+    return False
+
+
 # --- Endpoints ---
 
 class ReservationCreate(BaseModel):
@@ -107,6 +116,9 @@ def create_reservation(
 
     if _has_overlap(obj.reservations, date_debut, date_fin):
         raise HTTPException(status_code=400, detail="Objet non disponible sur cette période")
+
+    if _overlaps_fermeture(session, date_debut, date_fin):
+        raise HTTPException(status_code=400, detail="L'association est fermée sur cette période (congé admin)")
 
     # Déduction des crédits
     current_user.credits -= res_in.nb_semaines

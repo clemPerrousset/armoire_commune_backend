@@ -285,6 +285,26 @@ voir ci-dessus). Un objet sans réservation active et marqué indisponible
 repasse directement disponible au scan (`ancien_statut: "maintenance"`,
 `nouveau_statut: "disponible"`), sans passer par la vérification admin.
 
+### Congés admin (fermetures)
+
+Une semaine fermée (jeudi → mercredi 22h00, comme le cycle de réservation)
+bloque tous les objets à la réservation. Les réservations en cours qui la
+chevauchent sont prolongées gratuitement (sans coût en crédits) d'autant de
+semaines nouvellement fermées.
+
+```bash
+# Semaines actuellement fermées (public)
+curl "http://127.0.0.1:8000/fermetures"
+
+# Remplace l'ensemble des semaines fermées par cette liste (admin) —
+# les semaines absentes de la liste mais actuellement fermées sont réouvertes,
+# sans effet rétroactif sur les réservations déjà prolongées
+curl -X PUT "http://127.0.0.1:8000/admin/fermetures" \
+  -H "Authorization: Bearer TOKEN_ADMIN" \
+  -H "Content-Type: application/json" \
+  -d '{"semaines":["2026-09-10T00:00:00","2026-09-17T00:00:00"]}'
+```
+
 ### Retrait / retour legacy (pré-QR, toujours actifs mais dépréciés)
 
 ```bash
