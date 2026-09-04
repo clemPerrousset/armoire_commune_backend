@@ -273,6 +273,18 @@ def list_objets_en_retard(
     return session.exec(select(Objet).where(Objet.id.in_(objet_ids))).all()
 
 
+# --- Objets en maintenance ---
+
+@router.get("/admin/objets/maintenance", response_model=List[Objet])
+def list_objets_en_maintenance(
+    session: Session = Depends(get_session),
+    admin: User = Depends(get_current_admin)
+):
+    """Objets marqués indisponibles (maintenance) — à rescanner pour les remettre en service."""
+    objets = session.exec(select(Objet)).all()
+    return [obj for obj in objets if not obj.disponibilite_globale]
+
+
 # --- QR Scan : avancement du statut ---
 
 @router.post("/objets/{objet_id}/scan", response_model=ScanResult)
@@ -291,6 +303,20 @@ def scan_objet(
 
     reservation = _get_reservation_active(objet_id, session)
     if not reservation:
+        # Objet sans réservation en cours : s'il est indisponible (ex. maintenance),
+        # le scan sert à confirmer qu'il est réparé/de retour et le remet en service.
+        if not obj.disponibilite_globale:
+            obj.disponibilite_globale = True
+            session.add(obj)
+            session.commit()
+            return ScanResult(
+                objet_id=objet_id,
+                objet_nom=obj.nom,
+                ancien_statut="maintenance",
+                nouveau_statut="disponible",
+                reservation_id=None,
+                verification_requise=False,
+            )
         raise HTTPException(status_code=404, detail="Aucune réservation active pour cet objet")
 
     ancien_statut = reservation.status

@@ -273,6 +273,18 @@ curl -X POST "http://127.0.0.1:8000/admin/objets/1/mettre-en-maintenance" \
   -H "Authorization: Bearer TOKEN_ADMIN"
 ```
 
+### Objets en maintenance
+
+```bash
+# Liste des objets marqués indisponibles (maintenance)
+curl "http://127.0.0.1:8000/admin/objets/maintenance" -H "Authorization: Bearer TOKEN_ADMIN"
+```
+
+Pour remettre un objet en service : rescanner son QR (`POST /objets/{id}/scan`,
+voir ci-dessus). Un objet sans réservation active et marqué indisponible
+repasse directement disponible au scan (`ancien_statut: "maintenance"`,
+`nouveau_statut: "disponible"`), sans passer par la vérification admin.
+
 ### Retrait / retour legacy (pré-QR, toujours actifs mais dépréciés)
 
 ```bash
