@@ -63,7 +63,8 @@ def set_fermetures(
     sont prolongées gratuitement (pas de crédit supplémentaire) d'autant de
     semaines fermées concernées.
     """
-    requested: Set[datetime] = {_normalize(d) for d in body.semaines}
+    # Les dates arrivent souvent en UTC ("…Z") : on les stocke en naïf comme le reste.
+    requested: Set[datetime] = {_normalize(d.replace(tzinfo=None)) for d in body.semaines}
 
     existing = session.exec(select(Fermeture)).all()
     existing_dates = {f.date_debut for f in existing}

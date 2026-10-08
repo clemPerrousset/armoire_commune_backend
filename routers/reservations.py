@@ -59,10 +59,16 @@ def compute_date_fin(date_debut: datetime, nb_semaines: int) -> datetime:
     return date_fin.replace(hour=22, minute=0, second=0, microsecond=0)
 
 
+def _naive(dt: datetime) -> datetime:
+    """Retire le fuseau : toutes les dates métier sont stockées/comparées en naïf.
+    Comparer une date aware (ex. "…Z") et une naïve lève un TypeError (500)."""
+    return dt.replace(tzinfo=None) if dt.tzinfo else dt
+
+
 def _has_overlap(reservations, date_debut: datetime, date_fin: datetime) -> bool:
     for res in reservations:
         if res.status in STATUTS_BLOQUANTS:
-            if res.date_debut < date_fin and res.date_fin > date_debut:
+            if _naive(res.date_debut) < date_fin and _naive(res.date_fin) > date_debut:
                 return True
     return False
 
@@ -70,7 +76,8 @@ def _has_overlap(reservations, date_debut: datetime, date_fin: datetime) -> bool
 def _overlaps_fermeture(session: Session, date_debut: datetime, date_fin: datetime) -> bool:
     fermetures = session.exec(select(Fermeture)).all()
     for f in fermetures:
-        if f.date_debut < date_fin and week_end(f.date_debut) > date_debut:
+        f_debut = _naive(f.date_debut)
+        if f_debut < date_fin and week_end(f_debut) > date_debut:
             return True
     return False
 
@@ -111,7 +118,7 @@ def create_reservation(
         )
 
     # Ajustement au prochain jeudi
-    date_debut = next_thursday(res_in.date_debut)
+    date_debut = next_thursday(_naive(res_in.date_debut))
     date_fin = compute_date_fin(date_debut, res_in.nb_semaines)
 
     if _has_overlap(obj.reservations, date_debut, date_fin):

@@ -72,13 +72,19 @@ def _next_thursday(reference: datetime) -> datetime:
     return reference + timedelta(days=days_ahead)
 
 
+def _naive(dt: datetime) -> datetime:
+    return dt.replace(tzinfo=None) if dt.tzinfo else dt
+
+
 def _is_available_for_week(obj: Objet, date_debut: datetime, date_fin: datetime, fermetures=None) -> bool:
+    date_debut, date_fin = _naive(date_debut), _naive(date_fin)
     for res in obj.reservations:
         if res.status in STATUTS_BLOQUANTS:
-            if res.date_debut < date_fin and res.date_fin > date_debut:
+            if _naive(res.date_debut) < date_fin and _naive(res.date_fin) > date_debut:
                 return False
     for f in fermetures or []:
-        if f.date_debut < date_fin and week_end(f.date_debut) > date_debut:
+        f_debut = _naive(f.date_debut)
+        if f_debut < date_fin and week_end(f_debut) > date_debut:
             return False
     return True
 
@@ -300,8 +306,15 @@ def scan_objet(
     current_user: User = Depends(get_current_point_relais)
 ):
     """
-    Scan du QR code d'un objet par un admin ou point_relais.
-    Avance le statut de la réservation active au statut suivant.
+    Scan du QR code d'un objet par un admin ou point_relais. Avance le statut
+    de la réservation active au statut suivant, et met à jour la localisation
+    physique de l'objet en conséquence.
+
+    Un point relais (non-admin) ne peut faire avancer que le retrait
+    (mis_a_disposition → retire) et la restitution (retire → restitue), et
+    uniquement pour les réservations rattachées à l'un de ses lieux. La mise
+    à disposition, la remise en service après maintenance et le passage en
+    vérification restent réservés aux admins.
     """
     obj = session.get(Objet, objet_id)
     if not obj:
@@ -312,6 +325,8 @@ def scan_objet(
         # Objet sans réservation en cours : s'il est indisponible (ex. maintenance),
         # le scan sert à confirmer qu'il est réparé/de retour et le remet en service.
         if not obj.disponibilite_globale:
+            if not current_user.is_admin:
+                raise HTTPException(status_code=403, detail="La remise en service est réservée à un administrateur")
             obj.disponibilite_globale = True
             session.add(obj)
             session.commit()
@@ -332,9 +347,29 @@ def scan_objet(
             detail=f"Statut '{ancien_statut}' ne peut pas être avancé par scan"
         )
 
+    if not current_user.is_admin:
+        if ancien_statut not in ("mis_a_disposition", "retire"):
+            raise HTTPException(
+                status_code=403,
+                detail="Cette étape doit être effectuée par un administrateur"
+            )
+        user_lieux_ids = {lieu.id for lieu in current_user.lieux}
+        if reservation.lieu_id not in user_lieux_ids:
+            raise HTTPException(status_code=403, detail="Ce lieu n'est pas assigné à ce point relais")
+
     nouveau_statut = STATUT_SUIVANT[ancien_statut]
     reservation.status = nouveau_statut
     session.add(reservation)
+
+    # Localisation physique de l'objet
+    if nouveau_statut == "mis_a_disposition":
+        obj.current_lieu_id = reservation.lieu_id  # posé au point relais, prêt pour le retrait
+    elif nouveau_statut == "retire":
+        obj.current_lieu_id = None  # parti avec l'utilisateur
+    elif nouveau_statut == "restitue":
+        obj.current_lieu_id = reservation.lieu_id  # de retour au point relais
+    session.add(obj)
+
     session.commit()
 
     return ScanResult(
@@ -423,14 +458,18 @@ def mettre_en_maintenance(
     if not obj:
         raise HTTPException(status_code=404, detail="Objet not found")
 
-    reservation = session.exec(
+    # Ferme TOUTE réservation encore en cours pour cet objet, pas seulement
+    # celle en en_verification : sinon une réservation restée bloquée à une
+    # étape antérieure (ex: restitue) survit à la mise en maintenance et
+    # ressort plus tard dans "à vérifier" quand l'objet est rescanné.
+    reservations_en_cours = session.exec(
         select(Reservation).where(
             Reservation.objet_id == objet_id,
-            Reservation.status == "en_verification"
+            Reservation.status.in_(STATUTS_BLOQUANTS)
         )
-    ).first()
+    ).all()
 
-    if reservation:
+    for reservation in reservations_en_cours:
         reservation.status = "terminee"
         session.add(reservation)
 
