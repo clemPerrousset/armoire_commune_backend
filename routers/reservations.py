@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel
 
 from database import get_session
-from models import Reservation, Objet, User, Lieu, Fermeture, STATUTS_BLOQUANTS, STATUTS_EN_COURS
+from models import Reservation, Objet, User, Lieu, Fermeture, STATUTS_BLOQUANTS, STATUTS_EN_COURS, STATUT_SUIVANT
 from auth import get_current_user, get_current_admin
 from routers.fermetures import week_end
 
@@ -231,6 +231,36 @@ def list_all_reservations(
     if status:
         query = query.where(Reservation.status == status)
     return session.exec(query).all()
+
+
+@router.post("/admin/reservations/{reservation_id}/avancer", response_model=ReservationRead)
+def avancer_reservation(
+    reservation_id: int,
+    session: Session = Depends(get_session),
+    admin: User = Depends(get_current_admin)
+):
+    """Fait passer la réservation à l'étape suivante (équivalent d'un scan QR, sans QR)."""
+    res = session.get(Reservation, reservation_id)
+    if not res:
+        raise HTTPException(status_code=404, detail="Réservation introuvable")
+    if res.status not in STATUT_SUIVANT:
+        raise HTTPException(status_code=400, detail=f"Statut '{res.status}' ne peut pas être avancé")
+
+    nouveau = STATUT_SUIVANT[res.status]
+    res.status = nouveau
+    session.add(res)
+
+    obj = session.get(Objet, res.objet_id) if res.objet_id else None
+    if obj:
+        if nouveau in ("mis_a_disposition", "restitue"):
+            obj.current_lieu_id = res.lieu_id
+        elif nouveau == "retire":
+            obj.current_lieu_id = None
+        session.add(obj)
+
+    session.commit()
+    session.refresh(res)
+    return res
 
 
 @router.post("/admin/reservations/check-late")

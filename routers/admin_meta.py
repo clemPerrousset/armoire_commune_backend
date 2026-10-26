@@ -2,7 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 from typing import List
 from database import get_session
-from models import Tag, Lieu, Consommable, User, Association
+from models import (
+    Tag, Lieu, Consommable, User, Association, Objet, Reservation,
+    UserLieuLink, STATUTS_BLOQUANTS,
+)
 from auth import get_current_admin
 
 router = APIRouter(prefix="/admin_meta", tags=["Admin Metadata"])
@@ -36,6 +39,10 @@ def delete_tag(tag_id: int, session: Session = Depends(get_session), admin: User
     tag = session.get(Tag, tag_id)
     if not tag:
         raise HTTPException(status_code=404, detail="Tag not found")
+    # Détache les objets de ce tag (ils restent, sans catégorie)
+    for obj in session.exec(select(Objet).where(Objet.tag_id == tag_id)).all():
+        obj.tag_id = None
+        session.add(obj)
     session.delete(tag)
     session.commit()
     return {"ok": True}
@@ -57,6 +64,23 @@ def delete_lieu(lieu_id: int, session: Session = Depends(get_session), admin: Us
     lieu = session.get(Lieu, lieu_id)
     if not lieu:
         raise HTTPException(status_code=404, detail="Lieu not found")
+    actives = session.exec(
+        select(Reservation).where(
+            Reservation.lieu_id == lieu_id,
+            Reservation.status.in_(STATUTS_BLOQUANTS),
+        )
+    ).all()
+    if actives:
+        raise HTTPException(status_code=400, detail="Impossible de supprimer un lieu avec des réservations en cours")
+    # Nettoie les références : réservations passées, localisation des objets, points relais
+    for res in session.exec(select(Reservation).where(Reservation.lieu_id == lieu_id)).all():
+        res.lieu_id = None
+        session.add(res)
+    for obj in session.exec(select(Objet).where(Objet.current_lieu_id == lieu_id)).all():
+        obj.current_lieu_id = None
+        session.add(obj)
+    for link in session.exec(select(UserLieuLink).where(UserLieuLink.lieu_id == lieu_id)).all():
+        session.delete(link)
     session.delete(lieu)
     session.commit()
     return {"ok": True}

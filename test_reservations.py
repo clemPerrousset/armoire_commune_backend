@@ -474,3 +474,23 @@ def test_lieu_avec_description(session):
     }, headers=admin_headers)
     assert res.status_code == 200
     assert res.json()["description"] == "Ouvert lun-ven 9h-18h"
+
+
+def test_admin_avancer_reservation(session):
+    from datetime import datetime
+    from models import Reservation
+    admin = User(nom="A", prenom="A", email="adv@test.com", password_hash=get_password_hash("pw"), is_admin=True)
+    obj = Objet(nom="Perceuse", description="d")
+    session.add(admin); session.add(obj); session.commit(); session.refresh(obj)
+    res = Reservation(date_debut=datetime(2030, 1, 3), date_fin=datetime(2030, 1, 9, 22), objet_id=obj.id)
+    session.add(res); session.commit(); session.refresh(res)
+    token = client.post("/auth/login", data={"username": "adv@test.com", "password": "pw"}).json()["access_token"]
+    h = {"Authorization": f"Bearer {token}"}
+    r = client.post(f"/admin/reservations/{res.id}/avancer", headers=h)
+    assert r.status_code == 200 and r.json()["status"] == "mis_a_disposition"
+    session.refresh(res)
+    session.expunge(res)
+    for _ in range(3):
+        r = client.post(f"/admin/reservations/{res.id}/avancer", headers=h)
+    assert r.json()["status"] == "en_verification"
+    assert client.post(f"/admin/reservations/{res.id}/avancer", headers=h).status_code == 400
