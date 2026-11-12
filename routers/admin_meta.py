@@ -8,7 +8,7 @@ from PIL import Image
 from database import get_session
 from models import (
     Tag, Lieu, Consommable, User, Association, Objet, Reservation,
-    UserLieuLink, ObjetTagLink, STATUTS_BLOQUANTS,
+    UserLieuLink, ObjetTagLink, ObjetConsommableLink, STATUTS_BLOQUANTS,
 )
 from auth import get_current_admin
 
@@ -120,6 +120,66 @@ def create_consommable(consommable: Consommable, session: Session = Depends(get_
     session.commit()
     session.refresh(consommable)
     return consommable
+
+class ConsommableUpdate(BaseModel):
+    """Modification partielle : seuls les champs fournis sont changés.
+    Une description ou un lien vide efface la valeur."""
+    nom: Optional[str] = None
+    description: Optional[str] = None
+    prix: Optional[float] = None
+    quantite: Optional[int] = None
+    url: Optional[str] = None
+
+
+@router.put("/consommables/{consommable_id}", response_model=Consommable)
+def update_consommable(
+    consommable_id: int,
+    body: ConsommableUpdate,
+    session: Session = Depends(get_session),
+    admin: User = Depends(get_current_admin),
+):
+    cons = session.get(Consommable, consommable_id)
+    if not cons:
+        raise HTTPException(status_code=404, detail="Consommable not found")
+    fields = body.model_dump(exclude_unset=True)
+    if fields.get("nom") is not None and not fields["nom"].strip():
+        raise HTTPException(status_code=400, detail="Le nom ne peut pas être vide")
+    # nom, prix et quantité sont obligatoires : null = inchangé
+    for key in ("nom", "prix", "quantite"):
+        if key in fields and fields[key] is None:
+            fields.pop(key)
+    for key in ("description", "url"):
+        if key in fields and isinstance(fields[key], str) and not fields[key].strip():
+            fields[key] = None
+    for key, value in fields.items():
+        setattr(cons, key, value)
+    session.add(cons)
+    session.commit()
+    session.refresh(cons)
+    return cons
+
+
+@router.delete("/consommables/{consommable_id}")
+def delete_consommable(
+    consommable_id: int,
+    session: Session = Depends(get_session),
+    admin: User = Depends(get_current_admin),
+):
+    cons = session.get(Consommable, consommable_id)
+    if not cons:
+        raise HTTPException(status_code=404, detail="Consommable not found")
+    # Détache le consommable des objets (ils restent), puis supprime sa photo
+    for link in session.exec(
+        select(ObjetConsommableLink).where(ObjetConsommableLink.consommable_id == consommable_id)
+    ).all():
+        session.delete(link)
+    image_path = os.path.join(IMAGE_DIR, f"consommable_{consommable_id}.jpg")
+    session.delete(cons)
+    session.commit()
+    if os.path.exists(image_path):
+        os.remove(image_path)
+    return {"ok": True}
+
 
 @router.post("/consommables/{consommable_id}/image")
 async def upload_consommable_image(
