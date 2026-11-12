@@ -32,6 +32,18 @@ Un script de sauvegarde à chaud (`scripts/backup_db.py`, via `sqlite3.Connectio
 
 Coût négligeable pour une base de cette taille (quelques ms, quelques Ko/backup).
 
+### Rapport de santé quotidien (mail)
+
+`scripts/health_report.sh` vérifie le démon Docker, le conteneur, la réponse HTTP, que `DATABASE_URL` pointe bien dans `/data`, le contenu de la base, la fraîcheur des backups, disque/RAM et les erreurs applicatives des dernières 24h. Le sujet du mail passe en `ALERTE` dès qu'un point est KO.
+
+Prérequis : `msmtp` configuré dans `/etc/msmtprc`. Test sans envoi : `sudo bash scripts/health_report.sh --dry-run`.
+
+À ajouter dans la crontab **root** (`sudo crontab -e`, accès docker nécessaire) :
+
+```cron
+0 7 * * * cd /home/ubuntu/armoire_commune/armoire_commune_backend && bash scripts/health_report.sh destinataire@exemple.fr >> ../db_backups/health.log 2>&1
+```
+
 ### Développement local
 
 ```bash
