@@ -1,9 +1,6 @@
-import smtplib
-
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlmodel import Session
 
-import mailer
 from auth import get_current_admin
 from database import get_session
 from models import User
@@ -30,27 +27,17 @@ def get_stats(
     return compute_stats(session, _check(periode))
 
 
-@router.post("/export")
-def export_stats(
+@router.get("/pdf")
+def get_stats_pdf(
     periode: str = PERIODE_QUERY,
     session: Session = Depends(get_session),
     admin: User = Depends(get_current_admin),
 ):
-    """Génère le rapport PDF de la période et l'envoie par e-mail à l'adresse de contact."""
-    stats = compute_stats(session, _check(periode))
-    pdf = build_pdf(stats)
-    to = mailer.stats_recipient()
-    subject = f"L'Armoire Commune - statistiques ({stats['periode_label']})"
-    body = (
-        "Bonjour,\n\n"
-        f"Veuillez trouver ci-joint le rapport d'activité de l'Armoire Commune "
-        f"({stats['periode_label']}, du {stats['debut']} au {stats['fin']}).\n\n"
-        "Rapport généré automatiquement depuis l'application."
+    """Rapport PDF de la période. L'app le joint ensuite à un e-mail depuis le téléphone de l'admin."""
+    periode = _check(periode)
+    pdf = build_pdf(compute_stats(session, periode))
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="statistiques-{periode}.pdf"'},
     )
-    try:
-        mailer.send_mail(to, subject, body, attachment=pdf, attachment_name=f"statistiques-{periode}.pdf")
-    except mailer.MailNotConfigured:
-        raise HTTPException(status_code=503, detail="Envoi d'e-mail non configuré sur le serveur")
-    except (smtplib.SMTPException, OSError):
-        raise HTTPException(status_code=502, detail="Échec de l'envoi de l'e-mail")
-    return {"ok": True, "sent_to": to}

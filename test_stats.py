@@ -1,10 +1,8 @@
 """Statistiques admin : calcul, PDF, envoi d'e-mail et routes."""
-import smtplib
 from datetime import datetime
 
 import pytest
 
-import mailer
 import pdf_report
 from models import ObjetTagLink, Reservation, Tag
 from stats_service import compute_stats
@@ -165,90 +163,14 @@ def test_pdf_caracteres_hors_latin1_et_saut_de_page(session):
     assert pdf.page_no() == 2
 
 
-# ---------------------------------------------------------------- e-mail
-
-class FakeSMTP:
-    instances = []
-
-    def __init__(self, host, port, timeout=None):
-        self.host, self.port, self.calls = host, port, []
-        self.sent = None
-        FakeSMTP.instances.append(self)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *a):
-        return False
-
-    def starttls(self):
-        self.calls.append("starttls")
-
-    def login(self, user, password):
-        self.calls.append(("login", user, password))
-
-    def send_message(self, msg):
-        self.calls.append("send")
-        self.sent = msg
-
-
-@pytest.fixture
-def fake_smtp(monkeypatch):
-    FakeSMTP.instances = []
-    monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
-    monkeypatch.setattr(smtplib, "SMTP_SSL", FakeSMTP)
-    for k in ("SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM"):
-        monkeypatch.delenv(k, raising=False)
-    return FakeSMTP
-
-
-def test_mail_non_configure(fake_smtp):
-    with pytest.raises(mailer.MailNotConfigured):
-        mailer.send_mail("a@b.fr", "s", "b")
-    assert fake_smtp.instances == []
-
-
-def test_mail_starttls_login_et_piece_jointe(fake_smtp, monkeypatch):
-    monkeypatch.setenv("SMTP_HOST", "smtp.test")
-    monkeypatch.setenv("SMTP_USER", "robot@test.fr")
-    monkeypatch.setenv("SMTP_PASSWORD", "secret")
-    mailer.send_mail("contact@test.fr", "Sujet", "Corps", attachment=b"%PDF-x", attachment_name="r.pdf")
-
-    smtp = fake_smtp.instances[0]
-    assert (smtp.host, smtp.port) == ("smtp.test", 587)
-    assert smtp.calls == ["starttls", ("login", "robot@test.fr", "secret"), "send"]
-    assert smtp.sent["From"] == "robot@test.fr"  # SMTP_FROM absent : on retombe sur SMTP_USER
-    assert smtp.sent["To"] == "contact@test.fr" and smtp.sent["Subject"] == "Sujet"
-    piece = list(smtp.sent.iter_attachments())[0]
-    assert piece.get_filename() == "r.pdf" and piece.get_content() == b"%PDF-x"
-
-
-def test_mail_ssl_sans_identifiants_ni_piece_jointe(fake_smtp, monkeypatch):
-    monkeypatch.setenv("SMTP_HOST", "smtp.test")
-    monkeypatch.setenv("SMTP_PORT", "465")
-    monkeypatch.setenv("SMTP_FROM", "noreply@test.fr")
-    mailer.send_mail("contact@test.fr", "Sujet", "Corps")
-    smtp = fake_smtp.instances[0]
-    assert smtp.port == 465 and smtp.calls == ["send"]  # SMTP_SSL : ni starttls ni login
-    assert smtp.sent["From"] == "noreply@test.fr"
-    assert list(smtp.sent.iter_attachments()) == []
-
-
-def test_destinataire_par_defaut_et_configurable(monkeypatch):
-    monkeypatch.delenv("STATS_RECIPIENT", raising=False)
-    assert mailer.stats_recipient() == "contact@larmoirecommune.fr"
-    monkeypatch.setenv("STATS_RECIPIENT", "autre@test.fr")
-    assert mailer.stats_recipient() == "autre@test.fr"
-
-
 # ---------------------------------------------------------------- routes
 
 def test_routes_droits(session):
     _create_base_data(session)
     uh = _login("user@test.com", "user")
-    for method, url in (("get", "/admin/stats"), ("post", "/admin/stats/export")):
-        assert getattr(client, method)(url).status_code == 401
-        assert getattr(client, method)(url, headers=uh).status_code == 403
+    for url in ("/admin/stats", "/admin/stats/pdf"):
+        assert client.get(url).status_code == 401
+        assert client.get(url, headers=uh).status_code == 403
 
 
 def test_route_stats(session, jeu):
@@ -260,37 +182,15 @@ def test_route_stats(session, jeu):
     # période par défaut : le mois
     assert client.get("/admin/stats", headers=ah).json()["periode"] == "mois"
     assert client.get("/admin/stats?periode=siecle", headers=ah).status_code == 400
-    assert client.post("/admin/stats/export?periode=siecle", headers=ah).status_code == 400
 
 
-def test_route_export_envoie_le_pdf(session, jeu, monkeypatch):
-    envoyes = []
-    monkeypatch.delenv("STATS_RECIPIENT", raising=False)
-    monkeypatch.setattr(mailer, "send_mail", lambda *a, **k: envoyes.append((a, k)))
+def test_route_pdf(session, jeu):
     ah = _login("admin@test.com", "admin")
-
-    r = client.post("/admin/stats/export?periode=semaine", headers=ah)
+    r = client.get("/admin/stats/pdf?periode=semaine", headers=ah)
     assert r.status_code == 200
-    assert r.json() == {"ok": True, "sent_to": "contact@larmoirecommune.fr"}
-    (args, kwargs) = envoyes[0]
-    assert args[0] == "contact@larmoirecommune.fr"
-    assert "7 derniers jours" in args[1]
-    assert kwargs["attachment"].startswith(b"%PDF")
-    assert kwargs["attachment_name"] == "statistiques-semaine.pdf"
-
-
-def test_route_export_erreurs_mail(session, jeu, monkeypatch, fake_smtp):
-    ah = _login("admin@test.com", "admin")
-    # SMTP non configuré : message explicite
-    r = client.post("/admin/stats/export?periode=mois", headers=ah)
-    assert r.status_code == 503 and "non configuré" in r.json()["detail"]
-
-    def boom(exc):
-        def _raise(*a, **k):
-            raise exc
-        return _raise
-
-    monkeypatch.setattr(mailer, "send_mail", boom(smtplib.SMTPAuthenticationError(535, b"bad")))
-    assert client.post("/admin/stats/export?periode=mois", headers=ah).status_code == 502
-    monkeypatch.setattr(mailer, "send_mail", boom(ConnectionRefusedError()))
-    assert client.post("/admin/stats/export?periode=mois", headers=ah).status_code == 502
+    assert r.headers["content-type"] == "application/pdf"
+    assert 'filename="statistiques-semaine.pdf"' in r.headers["content-disposition"]
+    assert r.content.startswith(b"%PDF")
+    # période par défaut : le mois
+    assert 'statistiques-mois.pdf' in client.get("/admin/stats/pdf", headers=ah).headers["content-disposition"]
+    assert client.get("/admin/stats/pdf?periode=siecle", headers=ah).status_code == 400
