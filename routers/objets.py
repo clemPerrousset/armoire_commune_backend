@@ -10,11 +10,10 @@ from PIL import Image
 from database import get_session
 from models import (
     Objet, User, Consommable, ObjetConsommableLink, Reservation,
-    UserObjetHistoriqueLink, Lieu, UserLieuLink, Fermeture, Tag, ObjetTagLink,
+    UserObjetHistoriqueLink, UserObjetFavorisLink, Lieu, UserLieuLink, Tag, ObjetTagLink,
     STATUTS_BLOQUANTS, STATUT_SUIVANT
 )
 from auth import get_current_admin, get_current_user_optional, get_current_point_relais, get_current_user
-from routers.fermetures import week_end
 
 IMAGE_DIR = "/data/images"
 MAX_SIZE = (1200, 1200)  # assez grand pour l'affichage plein écran
@@ -169,16 +168,14 @@ def _naive(dt: datetime) -> datetime:
     return dt.replace(tzinfo=None) if dt.tzinfo else dt
 
 
-def _is_available_for_week(obj: Objet, date_debut: datetime, date_fin: datetime, fermetures=None) -> bool:
+def _is_available_for_week(obj: Objet, date_debut: datetime, date_fin: datetime) -> bool:
+    """Libre = aucune réservation bloquante sur la période. Les congés de l'équipe
+    ne comptent pas : ils prolongent la réservation au lieu de l'empêcher."""
     date_debut, date_fin = _naive(date_debut), _naive(date_fin)
     for res in obj.reservations:
         if res.status in STATUTS_BLOQUANTS:
             if _naive(res.date_debut) < date_fin and _naive(res.date_fin) > date_debut:
                 return False
-    for f in fermetures or []:
-        f_debut = _naive(f.date_debut)
-        if f_debut < date_fin and week_end(f_debut) > date_debut:
-            return False
     return True
 
 
@@ -321,9 +318,14 @@ def delete_objet(
     if active:
         raise HTTPException(status_code=400, detail="Impossible de supprimer un objet avec des réservations actives")
 
+    # Nettoie les liens (catégories, consommables, favoris, historique) pour ne pas laisser d'orphelins
+    for link_model in (ObjetTagLink, ObjetConsommableLink, UserObjetFavorisLink, UserObjetHistoriqueLink):
+        for link in session.exec(select(link_model).where(link_model.objet_id == objet_id)).all():
+            session.delete(link)
+    nom = obj.nom
     session.delete(obj)
     session.commit()
-    return {"ok": True, "message": f"Objet '{obj.nom}' supprimé"}
+    return {"ok": True, "message": f"Objet '{nom}' supprimé"}
 
 
 @router.put("/admin/objets/{objet_id}/available")

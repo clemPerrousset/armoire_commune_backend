@@ -1,0 +1,10 @@
+[run]
+# On mesure le code applicatif, pas les tests eux-mêmes
+omit =
+    test_*.py
+    conftest.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:

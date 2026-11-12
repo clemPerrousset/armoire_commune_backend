@@ -8,7 +8,7 @@ from PIL import Image
 from database import get_session
 from models import (
     Tag, Lieu, Consommable, User, Association, Objet, Reservation,
-    UserLieuLink, STATUTS_BLOQUANTS,
+    UserLieuLink, ObjetTagLink, STATUTS_BLOQUANTS,
 )
 from auth import get_current_admin
 
@@ -49,6 +49,9 @@ def delete_tag(tag_id: int, session: Session = Depends(get_session), admin: User
     for obj in session.exec(select(Objet).where(Objet.tag_id == tag_id)).all():
         obj.tag_id = None
         session.add(obj)
+    # Catégories multiples : retire aussi les liens objet↔catégorie
+    for link in session.exec(select(ObjetTagLink).where(ObjetTagLink.tag_id == tag_id)).all():
+        session.delete(link)
     session.delete(tag)
     session.commit()
     return {"ok": True}

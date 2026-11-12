@@ -1,105 +1,99 @@
-import pytest
-from fastapi.testclient import TestClient
+"""check-late : prolongation ou alerte des réservations dont la date de fin est dépassée.
+Les dates sont relatives à now() car l'endpoint compare à datetime.now()."""
 from datetime import datetime, timedelta
+
+from fastapi.testclient import TestClient
 
 from main import app
 from models import Objet, Reservation, User
+from auth import get_current_admin
 
-# conftest.py gère l'engine de test et la fixture session
 client = TestClient(app)
 
-def test_check_late_reservations_extends_if_no_future(session):
-    admin_user = User(nom="Admin", prenom="A", email="admin@test.com", password_hash="hash", is_admin=True)
-    user = User(nom="User", prenom="U", email="user@test.com", password_hash="hash")
 
-    objet = Objet(nom="Perc", description="test")
+def _admin_override(user):
+    app.dependency_overrides[get_current_admin] = lambda: user
 
-    session.add(admin_user)
-    session.add(user)
-    session.add(objet)
+
+def _base(session, suffix=""):
+    admin = User(nom="Admin", prenom="A", email=f"admin{suffix}@test.com", password_hash="hash", is_admin=True)
+    u1 = User(nom="U1", prenom="U", email=f"u1{suffix}@test.com", password_hash="hash")
+    u2 = User(nom="U2", prenom="U", email=f"u2{suffix}@test.com", password_hash="hash")
+    objet = Objet(nom=f"Perc{suffix}", description="test")
+    for o in (admin, u1, u2, objet):
+        session.add(o)
     session.commit()
+    for o in (admin, u1, u2, objet):
+        session.refresh(o)
+    return admin, u1, u2, objet
 
+
+def test_check_late_prolonge_si_pas_de_reservation_suivante(session):
+    admin, u1, _, objet = _base(session)
     now = datetime.now()
-    late_res = Reservation(
-        objet_id=objet.id,
-        user_id=user.id,
-        date_debut=now - timedelta(days=14),
-        date_fin=now - timedelta(days=7),
-        status="active"
-    )
-    session.add(late_res)
+    late = Reservation(objet_id=objet.id, user_id=u1.id, date_debut=now - timedelta(days=14),
+                       date_fin=now - timedelta(days=7), status="retire")
+    session.add(late)
     session.commit()
+    ancienne_fin = late.date_fin
+    _admin_override(admin)
 
-    # We need a token. We can override get_current_admin instead
-    from auth import get_current_admin
-    app.dependency_overrides[get_current_admin] = lambda: admin_user
-
-    response = client.post("/admin/reservations/check-late")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["processed"] == 1
+    r = client.post("/admin/reservations/check-late")
+    assert r.status_code == 200
+    data = r.json()
     assert data["extended"] == 1
     assert data["alerts_triggered"] == 0
 
-    # Verify DB
-    session.refresh(late_res)
-    # The end date should be pushed by 7 days
-    assert late_res.date_fin > now - timedelta(days=8)
+    session.refresh(late)
+    assert late.date_fin == ancienne_fin + timedelta(days=7)
 
-    app.dependency_overrides.pop(get_current_admin)
 
-def test_check_late_reservations_alerts_if_future(session):
-    admin_user = User(nom="Admin", prenom="A", email="admin2@test.com", password_hash="hash", is_admin=True)
-    user1 = User(nom="User1", prenom="U", email="user1@test.com", password_hash="hash")
-    user2 = User(nom="User2", prenom="U", email="user2@test.com", password_hash="hash")
-
-    objet = Objet(nom="Perc2", description="test")
-
-    session.add(admin_user)
-    session.add(user1)
-    session.add(user2)
-    session.add(objet)
-    session.commit()
-
+def test_check_late_alerte_si_reservation_suivante_puis_clear(session):
+    admin, u1, u2, objet = _base(session, "2")
     now = datetime.now()
-    late_res = Reservation(
-        objet_id=objet.id,
-        user_id=user1.id,
-        date_debut=now - timedelta(days=14),
-        date_fin=now - timedelta(days=7),
-        status="active"
-    )
-
-    future_res = Reservation(
-        objet_id=objet.id,
-        user_id=user2.id,
-        date_debut=now - timedelta(days=6), # starts after late_res ends
-        date_fin=now + timedelta(days=1),
-        status="active"
-    )
-
-    session.add(late_res)
-    session.add(future_res)
+    late = Reservation(objet_id=objet.id, user_id=u1.id, date_debut=now - timedelta(days=14),
+                       date_fin=now - timedelta(days=7), status="retire")
+    futur = Reservation(objet_id=objet.id, user_id=u2.id, date_debut=now - timedelta(days=6),
+                        date_fin=now + timedelta(days=1), status="en_preparation")
+    session.add(late)
+    session.add(futur)
     session.commit()
+    _admin_override(admin)
 
-    from auth import get_current_admin
-    app.dependency_overrides[get_current_admin] = lambda: admin_user
-
-    response = client.post("/admin/reservations/check-late")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["processed"] == 1
+    data = client.post("/admin/reservations/check-late").json()
     assert data["extended"] == 0
     assert data["alerts_triggered"] == 1
-
-    # Verify DB
     session.refresh(objet)
     assert objet.alert is True
 
-    # Test clear alert
-    response2 = client.post(f"/admin/objets/{objet.id}/clear-alert")
-    assert response2.status_code == 200
+    # La liste des alertes contient l'objet (route admin)
+    alerts = client.get("/admin/objets/alerts").json()
+    assert [o["id"] for o in alerts] == [objet.id]
+
+    assert client.post(f"/admin/objets/{objet.id}/clear-alert").status_code == 200
     session.refresh(objet)
     assert objet.alert is False
 
-    app.dependency_overrides.pop(get_current_admin)
+
+def test_check_late_ignore_restitue_et_en_verification(session):
+    admin, u1, _, objet = _base(session, "3")
+    now = datetime.now()
+    for st in ("restitue", "en_verification"):
+        session.add(Reservation(objet_id=objet.id, user_id=u1.id, date_debut=now - timedelta(days=14),
+                                date_fin=now - timedelta(days=7), status=st))
+    session.commit()
+    _admin_override(admin)
+    data = client.post("/admin/reservations/check-late").json()
+    assert data["extended"] == 0 and data["alerts_triggered"] == 0
+
+
+def test_alerts_vide_sans_retard(session):
+    admin, _, _, _ = _base(session, "4")
+    _admin_override(admin)
+    assert client.get("/admin/objets/alerts").json() == []
+
+
+def test_clear_alert_objet_inconnu_404(session):
+    admin, _, _, _ = _base(session, "5")
+    _admin_override(admin)
+    assert client.post("/admin/objets/9999/clear-alert").status_code == 404
