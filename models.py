@@ -42,6 +42,8 @@ class User(SQLModel, table=True):
     password_hash: str
     is_admin: bool = Field(default=False)
     is_point_relais: bool = Field(default=False)
+    # Date d'inscription (statistiques). Vide pour les comptes créés avant l'ajout de ce champ.
+    created_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
 
     # Crédits : 100 par an, 1 déduit par semaine réservée
     credits: int = Field(default=100)
