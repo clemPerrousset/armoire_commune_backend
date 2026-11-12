@@ -82,6 +82,20 @@ def _overlaps_fermeture(session: Session, date_debut: datetime, date_fin: dateti
     return False
 
 
+def _extend_for_fermetures(session: Session, date_debut: datetime, date_fin: datetime) -> datetime:
+    """Prolonge date_fin d'une semaine par semaine de congé chevauchée (recalculé jusqu'à stabilité,
+    car la prolongation peut elle-même atteindre une nouvelle semaine fermée)."""
+    fermetures = [_naive(f.date_debut) for f in session.exec(select(Fermeture)).all()]
+    base_fin = date_fin
+    n = 0
+    while True:
+        fin = base_fin + timedelta(days=7 * n)
+        new_n = sum(1 for d in fermetures if d < fin and week_end(d) > date_debut)
+        if new_n == n:
+            return fin
+        n = new_n
+
+
 # --- Endpoints ---
 
 class ReservationCreate(BaseModel):
@@ -121,11 +135,12 @@ def create_reservation(
     date_debut = next_thursday(_naive(res_in.date_debut))
     date_fin = compute_date_fin(date_debut, res_in.nb_semaines)
 
+    # Congé de l'équipe : on ne bloque plus, la réservation est prolongée gratuitement
+    # d'autant de semaines fermées qu'elle en chevauche.
+    date_fin = _extend_for_fermetures(session, date_debut, date_fin)
+
     if _has_overlap(obj.reservations, date_debut, date_fin):
         raise HTTPException(status_code=400, detail="Objet non disponible sur cette période")
-
-    if _overlaps_fermeture(session, date_debut, date_fin):
-        raise HTTPException(status_code=400, detail="L'association est fermée sur cette période (congé admin)")
 
     # Déduction des crédits
     current_user.credits -= res_in.nb_semaines

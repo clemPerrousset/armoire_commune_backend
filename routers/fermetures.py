@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel
 
 from database import get_session
-from models import Fermeture, Reservation, User, STATUTS_EN_COURS
+from models import Fermeture, Reservation, User, Objet, Notification, STATUTS_EN_COURS
 from auth import get_current_admin
 
 router = APIRouter(tags=["Fermetures"])
@@ -100,3 +100,14 @@ def _shift_ongoing_reservations(session: Session, newly_closed_dates: Set[dateti
         if overlapping:
             res.date_fin = res.date_fin + timedelta(days=7 * overlapping)
             session.add(res)
+            if res.user_id:
+                obj = session.get(Objet, res.objet_id) if res.objet_id else None
+                nom = f"« {obj.nom} »" if obj else "votre objet"
+                session.add(Notification(
+                    user_id=res.user_id,
+                    message=(
+                        f"L'équipe de l'Armoire Commune est en congé : votre réservation de {nom} "
+                        f"a été prolongée de {overlapping} semaine(s), jusqu'au "
+                        f"{res.date_fin.strftime('%d/%m/%Y')}, sans crédit supplémentaire."
+                    ),
+                ))

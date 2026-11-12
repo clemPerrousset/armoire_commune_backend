@@ -7,7 +7,9 @@ from pydantic import BaseModel
 import os
 
 from database import get_session
-from models import User, Objet, UserObjetFavorisLink, UserObjetHistoriqueLink, Lieu, UserLieuLink
+from models import User, Objet, UserObjetFavorisLink, UserObjetHistoriqueLink, Lieu, UserLieuLink, Notification
+from routers.objets import ObjetRead, objet_to_read
+from datetime import datetime
 from auth import get_password_hash, create_access_token, verify_password, get_current_admin, get_current_user, ACCESS_TOKEN_EXPIRE_MINUTES
 
 router = APIRouter()
@@ -28,6 +30,14 @@ class UserRead(BaseModel):
     is_point_relais: bool
     association_id: Optional[int] = None
     credits: int = 100
+
+    class Config:
+        from_attributes = True
+
+class NotificationRead(BaseModel):
+    id: int
+    message: str
+    created_at: datetime
 
     class Config:
         from_attributes = True
@@ -118,13 +128,32 @@ def remove_favori(objet_id: int, session: Session = Depends(get_session), curren
     session.commit()
     return {"message": "Objet removed from favorites"}
 
-@router.get("/users/favoris", response_model=List[Objet])
+@router.get("/users/favoris", response_model=List[ObjetRead])
 def list_favoris(session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
     statement = select(Objet).join(UserObjetFavorisLink).where(UserObjetFavorisLink.user_id == current_user.id)
     favoris = session.exec(statement).all()
-    return favoris
+    return [objet_to_read(o, current_user.is_admin) for o in favoris]
 
-@router.get("/users/historique", response_model=List[Objet])
+@router.get("/users/notifications", response_model=List[NotificationRead])
+def list_notifications(session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
+    """Notifications non lues de l'utilisateur (ex. réservation prolongée pour cause de congé)."""
+    return session.exec(
+        select(Notification)
+        .where(Notification.user_id == current_user.id, Notification.lu == False)  # noqa: E712
+        .order_by(Notification.created_at)
+    ).all()
+
+@router.post("/users/notifications/{notification_id}/lu")
+def mark_notification_read(notification_id: int, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
+    notif = session.get(Notification, notification_id)
+    if not notif or notif.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    notif.lu = True
+    session.add(notif)
+    session.commit()
+    return {"ok": True}
+
+@router.get("/users/historique", response_model=List[ObjetRead])
 def list_historique(session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
     statement = (
         select(Objet)
@@ -133,7 +162,7 @@ def list_historique(session: Session = Depends(get_session), current_user: User 
         .order_by(UserObjetHistoriqueLink.date_consultation.desc())
     )
     historique = session.exec(statement).all()
-    return historique
+    return [objet_to_read(o, current_user.is_admin) for o in historique]
 
 @router.put("/admin/users/{user_id}/promote")
 def promote_user(user_id: int, is_admin: bool, current_admin: User = Depends(get_current_admin), session: Session = Depends(get_session)):

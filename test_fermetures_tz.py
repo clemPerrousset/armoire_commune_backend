@@ -17,11 +17,11 @@ def test_fermeture_utc_ne_bloque_pas_autres_semaines(session):
     body = {"objet_id": objet.id, "lieu_id": lieu.id, "date_debut": "2026-10-08T10:00:00", "nb_semaines": 1}
     assert client.post("/reservations", json=body, headers=uh).status_code == 200
 
-    # Pendant la fermeture : refus propre (400) avec le vrai motif
+    # Pendant la fermeture : la réservation reste possible mais est prolongée d'une semaine
     body["date_debut"] = "2026-09-17T10:00:00"
     r = client.post("/reservations", json=body, headers=uh)
-    assert r.status_code == 400
-    assert "fermée" in r.json()["detail"]
+    assert r.status_code == 200
+    assert r.json()["date_fin"] == "2026-09-30T22:00:00"
 
 
 def test_dates_aware_ne_plantent_pas(session):

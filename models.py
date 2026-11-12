@@ -6,6 +6,11 @@ class ObjetConsommableLink(SQLModel, table=True):
     objet_id: Optional[int] = Field(default=None, foreign_key="objet.id", primary_key=True)
     consommable_id: Optional[int] = Field(default=None, foreign_key="consommable.id", primary_key=True)
 
+class ObjetTagLink(SQLModel, table=True):
+    """Catégories multiples par objet (Objet.tag_id reste la catégorie principale, pour compatibilité)."""
+    objet_id: Optional[int] = Field(default=None, foreign_key="objet.id", primary_key=True)
+    tag_id: Optional[int] = Field(default=None, foreign_key="tag.id", primary_key=True)
+
 class UserObjetFavorisLink(SQLModel, table=True):
     user_id: Optional[int] = Field(default=None, foreign_key="user.id", primary_key=True)
     objet_id: Optional[int] = Field(default=None, foreign_key="objet.id", primary_key=True)
@@ -70,6 +75,8 @@ class Consommable(SQLModel, table=True):
     description: Optional[str] = None
     quantite: int = 0
     prix: float
+    image: Optional[str] = None
+    url: Optional[str] = None  # lien d'achat (Yapla pour l'instant, Stripe plus tard)
     objets: List["Objet"] = Relationship(back_populates="consommables", link_model=ObjetConsommableLink)
 
 class Objet(SQLModel, table=True):
@@ -79,12 +86,14 @@ class Objet(SQLModel, table=True):
     image: Optional[str] = None
     disponibilite_globale: bool = Field(default=True)
     alert: bool = Field(default=False)
+    stockage: Optional[str] = Field(default=None)  # code d'emplacement (A1, B2…), visible admin uniquement
 
     current_lieu_id: Optional[int] = Field(default=None, foreign_key="lieu.id", ondelete="SET NULL")
     current_lieu: Optional[Lieu] = Relationship()
 
     tag_id: Optional[int] = Field(default=None, foreign_key="tag.id", ondelete="SET NULL")
     tag: Optional[Tag] = Relationship(back_populates="objets")
+    tags: List[Tag] = Relationship(link_model=ObjetTagLink)
 
     association_id: Optional[int] = Field(default=None, foreign_key="association.id")
     association: Optional[Association] = Relationship(back_populates="objets")
@@ -123,6 +132,15 @@ class Reservation(SQLModel, table=True):
 
     lieu_id: Optional[int] = Field(default=None, foreign_key="lieu.id")
     lieu: Optional[Lieu] = Relationship()
+
+
+class Notification(SQLModel, table=True):
+    """Message à afficher à l'utilisateur (ex. prolongation due à un congé de l'équipe)."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    message: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    lu: bool = Field(default=False)
 
 
 class Fermeture(SQLModel, table=True):
