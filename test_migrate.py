@@ -112,3 +112,51 @@ def test_migrate_lance_seul_ajoute_les_colonnes(tmp_path):
     conn.close()
     assert "stockage" in cols
     assert nb == 1  # les données existantes sont conservées
+
+
+def test_migrate_lance_seul_complete_toutes_les_tables(tmp_path):
+    """Garde-fou général : à partir de tables 'anciennes' réduites à leur id, le
+    script lancé comme dans entrypoint.sh (`python migrate.py`, processus neuf) doit
+    ajouter TOUTES les colonnes déclarées dans les modèles. Toute future colonne
+    oubliée ou tout modèle non importé fait échouer ce test, pas la prod."""
+    import os
+    import subprocess
+    import sys
+
+    from sqlmodel import SQLModel
+
+    import models  # noqa: F401 — charge les tables dans la metadata du test
+
+    # Tables à clé composite : on ne peut pas les réduire à un seul 'id'
+    tables = {
+        name: t for name, t in SQLModel.metadata.tables.items() if "id" in t.columns
+    }
+    assert "objet" in tables and "user" in tables  # sanity : la metadata est bien chargée
+
+    db_file = tmp_path / "minimal_legacy.db"
+    conn = sqlite3.connect(str(db_file))
+    for name in tables:
+        conn.execute(f'CREATE TABLE "{name}" (id INTEGER PRIMARY KEY)')
+        conn.execute(f'INSERT INTO "{name}" (id) VALUES (1)')
+    conn.commit()
+    conn.close()
+
+    repo = os.path.dirname(os.path.abspath(__file__))
+    env = dict(os.environ, DATABASE_URL=f"sqlite:///{db_file}")
+    result = subprocess.run(
+        [sys.executable, "migrate.py"], cwd=repo, env=env, capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+
+    conn = sqlite3.connect(str(db_file))
+    manquantes = {}
+    for name, table in SQLModel.metadata.tables.items():
+        existing = {r[1] for r in conn.execute(f'pragma table_info("{name}")')}
+        missing = {c.name for c in table.columns} - existing
+        if missing:
+            manquantes[name] = sorted(missing)
+    lignes = {name: conn.execute(f'select count(*) from "{name}"').fetchone()[0] for name in tables}
+    conn.close()
+
+    assert not manquantes, f"colonnes non ajoutées par migrate.py : {manquantes}"
+    assert all(n == 1 for n in lignes.values()), f"des données ont été perdues : {lignes}"
