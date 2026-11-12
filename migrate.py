@@ -14,6 +14,7 @@ from sqlalchemy import inspect, text
 
 from database import engine, create_db_and_tables
 from sqlmodel import SQLModel
+import models  # noqa: F401  — enregistre les tables dans SQLModel.metadata (sinon lancé seul, le script ne voit aucune table)
 
 
 def _format_default(column):

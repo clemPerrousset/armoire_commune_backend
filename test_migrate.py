@@ -79,3 +79,36 @@ def test_migrate_is_idempotent(old_schema_engine):
     with old_schema_engine.connect() as conn:
         columns = [row[1] for row in conn.exec_driver_sql("PRAGMA table_info(user)")]
         assert columns.count("credits") == 1
+
+
+def test_migrate_lance_seul_ajoute_les_colonnes(tmp_path):
+    """Régression : `python migrate.py` (comme dans entrypoint.sh) doit voir les
+    tables du modèle. Avant, models n'était pas importé -> aucune colonne ajoutée."""
+    import os
+    import subprocess
+    import sys
+
+    db_file = tmp_path / "legacy.db"
+    conn = sqlite3.connect(str(db_file))
+    conn.execute(
+        "CREATE TABLE objet (id INTEGER PRIMARY KEY, nom VARCHAR NOT NULL, "
+        "description VARCHAR NOT NULL, image VARCHAR, disponibilite_globale BOOLEAN, "
+        "alert BOOLEAN, current_lieu_id INTEGER, tag_id INTEGER, association_id INTEGER)"
+    )
+    conn.execute("INSERT INTO objet (nom, description, tag_id) VALUES ('Perceuse', 'x', NULL)")
+    conn.commit()
+    conn.close()
+
+    repo = os.path.dirname(os.path.abspath(__file__))
+    env = dict(os.environ, DATABASE_URL=f"sqlite:///{db_file}")
+    result = subprocess.run(
+        [sys.executable, "migrate.py"], cwd=repo, env=env, capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+
+    conn = sqlite3.connect(str(db_file))
+    cols = [r[1] for r in conn.execute("pragma table_info(objet)")]
+    nb = conn.execute("select count(*) from objet").fetchone()[0]
+    conn.close()
+    assert "stockage" in cols
+    assert nb == 1  # les données existantes sont conservées
