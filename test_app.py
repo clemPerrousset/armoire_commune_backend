@@ -78,8 +78,11 @@ def test_full_flow(session):
     assert res.status_code == 200
     assert len(res.json()) == 0
 
-    # 8. Admin Return Object
-    res = client.post(f"/admin/reservations/{reservation_id}/return", headers=admin_headers)
+    # 8. Flux complet jusqu'à la validation admin (l'objet redevient réservable)
+    for _ in range(4):
+        res = client.post(f"/admin/reservations/{reservation_id}/avancer", headers=admin_headers)
+        assert res.status_code == 200
+    res = client.post(f"/admin/objets/{objet_id}/valider", headers=admin_headers)
     assert res.status_code == 200
 
     # 9. Check Availability (Should be 1 now)

@@ -1,12 +1,18 @@
-from fastapi import APIRouter, Depends, HTTPException
+import io
+import os
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlmodel import Session, select
-from typing import List
+from typing import List, Optional
+from pydantic import BaseModel
+from PIL import Image
 from database import get_session
 from models import (
     Tag, Lieu, Consommable, User, Association, Objet, Reservation,
-    UserLieuLink, STATUTS_BLOQUANTS,
+    UserLieuLink, ObjetTagLink, STATUTS_BLOQUANTS,
 )
 from auth import get_current_admin
+
+IMAGE_DIR = "/data/images"
 
 router = APIRouter(prefix="/admin_meta", tags=["Admin Metadata"])
 
@@ -43,11 +49,33 @@ def delete_tag(tag_id: int, session: Session = Depends(get_session), admin: User
     for obj in session.exec(select(Objet).where(Objet.tag_id == tag_id)).all():
         obj.tag_id = None
         session.add(obj)
+    # Catégories multiples : retire aussi les liens objet↔catégorie
+    for link in session.exec(select(ObjetTagLink).where(ObjetTagLink.tag_id == tag_id)).all():
+        session.delete(link)
     session.delete(tag)
     session.commit()
     return {"ok": True}
 
 # Lieux
+class LieuUpdate(BaseModel):
+    nom: Optional[str] = None
+    adresse: Optional[str] = None
+    description: Optional[str] = None  # horaires d'ouverture
+    lat: Optional[float] = None
+    long: Optional[float] = None
+
+@router.put("/lieux/{lieu_id}", response_model=Lieu)
+def update_lieu(lieu_id: int, body: LieuUpdate, session: Session = Depends(get_session), admin: User = Depends(get_current_admin)):
+    lieu = session.get(Lieu, lieu_id)
+    if not lieu:
+        raise HTTPException(status_code=404, detail="Lieu not found")
+    for key, value in body.model_dump(exclude_unset=True).items():
+        setattr(lieu, key, value)
+    session.add(lieu)
+    session.commit()
+    session.refresh(lieu)
+    return lieu
+
 @router.post("/lieux", response_model=Lieu)
 def create_lieu(lieu: Lieu, session: Session = Depends(get_session), admin: User = Depends(get_current_admin)):
     session.add(lieu)
@@ -92,6 +120,27 @@ def create_consommable(consommable: Consommable, session: Session = Depends(get_
     session.commit()
     session.refresh(consommable)
     return consommable
+
+@router.post("/consommables/{consommable_id}/image")
+async def upload_consommable_image(
+    consommable_id: int,
+    file: UploadFile = File(...),
+    session: Session = Depends(get_session),
+    admin: User = Depends(get_current_admin),
+):
+    cons = session.get(Consommable, consommable_id)
+    if not cons:
+        raise HTTPException(status_code=404, detail="Consommable not found")
+    if file.content_type not in ("image/jpeg", "image/png", "image/webp", "image/gif"):
+        raise HTTPException(status_code=400, detail="Format non supporté")
+    img = Image.open(io.BytesIO(await file.read())).convert("RGB")
+    img.thumbnail((1200, 1200), Image.LANCZOS)
+    os.makedirs(IMAGE_DIR, exist_ok=True)
+    img.save(os.path.join(IMAGE_DIR, f"consommable_{consommable_id}.jpg"), format="JPEG", quality=75, optimize=True)
+    cons.image = f"/images/consommable_{consommable_id}.jpg"
+    session.add(cons)
+    session.commit()
+    return {"image_url": cons.image}
 
 @router.get("/consommables", response_model=List[Consommable], tags=["Public Metadata"])
 def list_consommables(session: Session = Depends(get_session)):

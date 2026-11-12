@@ -62,6 +62,15 @@ def migrate():
                 print(f"[migrate] {table_name}.{column.name} ({col_type}) — colonne manquante, ajout")
                 conn.execute(text(ddl))
 
+        # Catégories multiples : les objets existants gardent leur catégorie unique (tag_id)
+        # sous forme de lien dans objettaglink (idempotent).
+        tables_now = set(inspect(engine).get_table_names())
+        if {"objet", "objettaglink"} <= tables_now:
+            conn.execute(text(
+                "INSERT OR IGNORE INTO objettaglink (objet_id, tag_id) "
+                "SELECT id, tag_id FROM objet WHERE tag_id IS NOT NULL"
+            ))
+
 
 if __name__ == "__main__":
     migrate()

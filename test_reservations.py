@@ -332,7 +332,7 @@ def test_calendrier_objet(session):
     res = client.get(f"/reservations/objet/{objet.id}")
     assert res.status_code == 200
     assert len(res.json()) == 1
-    assert res.json()[0]["status"] == "active"
+    assert res.json()[0]["status"] == "en_preparation"
 
 
 # ---------------------------------------------------------------
@@ -351,7 +351,10 @@ def test_historique_reservations_terminées(session):
     }, headers=user_headers)
     reservation_id = res.json()["id"]
 
-    client.post(f"/admin/reservations/{reservation_id}/return", headers=admin_headers)
+    # Flux complet : 4 avancées (mis à dispo → retiré → restitué → en vérification), puis validation
+    for _ in range(4):
+        assert client.post(f"/admin/reservations/{reservation_id}/avancer", headers=admin_headers).status_code == 200
+    assert client.post(f"/admin/objets/{objet.id}/valider", headers=admin_headers).status_code == 200
 
     # L'historique doit la contenir
     hist = client.get("/reservations/historique", headers=user_headers)
@@ -395,9 +398,9 @@ def test_filtre_statut_admin(session):
     assert res_all.status_code == 200
     assert len(res_all.json()) == 2
 
-    res_active = client.get("/admin/reservations?status=active", headers=admin_headers)
+    res_active = client.get("/admin/reservations?status=en_preparation", headers=admin_headers)
     assert len(res_active.json()) == 1
-    assert res_active.json()[0]["status"] == "active"
+    assert res_active.json()[0]["status"] == "en_preparation"
 
     res_annulee = client.get("/admin/reservations?status=annulee", headers=admin_headers)
     assert len(res_annulee.json()) == 1

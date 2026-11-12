@@ -25,6 +25,16 @@ def get_test_session():
 app.dependency_overrides[get_session] = get_test_session
 
 
+@pytest.fixture(autouse=True)
+def _reset_dependency_overrides():
+    """Garantit l'isolation : un test qui échoue en cours de route ne doit pas laisser
+    un `get_current_admin` surchargé actif pour tous les tests suivants."""
+    yield
+    for dep in list(app.dependency_overrides):
+        if dep is not get_session:
+            app.dependency_overrides.pop(dep, None)
+
+
 @pytest.fixture(name="session", autouse=False)
 def session_fixture():
     """Recrée les tables avant chaque test et les supprime après."""

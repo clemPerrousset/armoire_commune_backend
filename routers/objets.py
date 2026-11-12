@@ -10,14 +10,13 @@ from PIL import Image
 from database import get_session
 from models import (
     Objet, User, Consommable, ObjetConsommableLink, Reservation,
-    UserObjetHistoriqueLink, Lieu, UserLieuLink, Fermeture,
+    UserObjetHistoriqueLink, UserObjetFavorisLink, Lieu, UserLieuLink, Tag, ObjetTagLink,
     STATUTS_BLOQUANTS, STATUT_SUIVANT
 )
 from auth import get_current_admin, get_current_user_optional, get_current_point_relais, get_current_user
-from routers.fermetures import week_end
 
 IMAGE_DIR = "/data/images"
-MAX_SIZE = (500, 500)
+MAX_SIZE = (1200, 1200)  # assez grand pour l'affichage plein écran
 JPEG_QUALITY = 75
 
 router = APIRouter(tags=["Objets"])
@@ -27,10 +26,103 @@ class ObjetCreate(SQLModel):
     nom: str
     description: str
     image: Optional[str] = None
-    tag_id: Optional[int] = None
+    tag_id: Optional[int] = None          # ancien champ (catégorie unique) — toujours accepté
+    tag_ids: List[int] = []               # catégories multiples
     association_id: Optional[int] = None
     consommable_ids: List[int] = []
     disponibilite_globale: bool = True
+    stockage: Optional[str] = None
+
+
+class ObjetUpdate(SQLModel):
+    """Modification partielle : seuls les champs fournis sont changés."""
+    nom: Optional[str] = None
+    description: Optional[str] = None
+    tag_ids: Optional[List[int]] = None
+    consommable_ids: Optional[List[int]] = None
+    stockage: Optional[str] = None
+
+
+class TagOut(BaseModel):
+    id: int
+    nom: str
+
+
+class ConsommableOut(BaseModel):
+    id: int
+    nom: str
+    description: Optional[str] = None
+    quantite: int = 0
+    prix: float
+    image: Optional[str] = None
+    url: Optional[str] = None
+
+
+class ObjetRead(BaseModel):
+    id: int
+    nom: str
+    description: str
+    image: Optional[str] = None
+    disponibilite_globale: bool
+    alert: bool
+    current_lieu_id: Optional[int] = None
+    tag_id: Optional[int] = None
+    tag: Optional[TagOut] = None
+    tags: List[TagOut] = []
+    consommables: List[ConsommableOut] = []
+    stockage: Optional[str] = None  # renseigné uniquement pour les admins
+
+
+def objet_to_read(obj: Objet, is_admin: bool = False) -> ObjetRead:
+    tags = list(obj.tags)
+    # Objets créés avant les catégories multiples : on retombe sur la catégorie unique
+    if not tags and obj.tag is not None:
+        tags = [obj.tag]
+    return ObjetRead(
+        id=obj.id,
+        nom=obj.nom,
+        description=obj.description,
+        image=obj.image,
+        disponibilite_globale=obj.disponibilite_globale,
+        alert=obj.alert,
+        current_lieu_id=obj.current_lieu_id,
+        tag_id=obj.tag_id,
+        tag=TagOut(id=obj.tag.id, nom=obj.tag.nom) if obj.tag else None,
+        tags=[TagOut(id=t.id, nom=t.nom) for t in tags],
+        consommables=[
+            ConsommableOut(
+                id=c.id, nom=c.nom, description=c.description, quantite=c.quantite,
+                prix=c.prix, image=c.image, url=c.url,
+            )
+            for c in obj.consommables
+        ],
+        stockage=obj.stockage if is_admin else None,
+    )
+
+
+def _apply_tags(session: Session, obj: Objet, tag_ids: List[int]):
+    """Remplace les catégories de l'objet ; la première devient la catégorie principale (tag_id)."""
+    ids = list(dict.fromkeys(tag_ids))
+    for tid in ids:
+        if not session.get(Tag, tid):
+            raise HTTPException(status_code=404, detail=f"Catégorie {tid} introuvable")
+    for link in session.exec(select(ObjetTagLink).where(ObjetTagLink.objet_id == obj.id)).all():
+        session.delete(link)
+    session.flush()
+    for tid in ids:
+        session.add(ObjetTagLink(objet_id=obj.id, tag_id=tid))
+    obj.tag_id = ids[0] if ids else None
+    session.add(obj)
+
+
+def _apply_consommables(session: Session, obj: Objet, consommable_ids: List[int]):
+    for link in session.exec(select(ObjetConsommableLink).where(ObjetConsommableLink.objet_id == obj.id)).all():
+        session.delete(link)
+    session.flush()
+    for c_id in dict.fromkeys(consommable_ids):
+        if not session.get(Consommable, c_id):
+            raise HTTPException(status_code=404, detail=f"Consommable {c_id} introuvable")
+        session.add(ObjetConsommableLink(objet_id=obj.id, consommable_id=c_id))
 
 
 class ReservationBrief(BaseModel):
@@ -76,16 +168,14 @@ def _naive(dt: datetime) -> datetime:
     return dt.replace(tzinfo=None) if dt.tzinfo else dt
 
 
-def _is_available_for_week(obj: Objet, date_debut: datetime, date_fin: datetime, fermetures=None) -> bool:
+def _is_available_for_week(obj: Objet, date_debut: datetime, date_fin: datetime) -> bool:
+    """Libre = aucune réservation bloquante sur la période. Les congés de l'équipe
+    ne comptent pas : ils prolongent la réservation au lieu de l'empêcher."""
     date_debut, date_fin = _naive(date_debut), _naive(date_fin)
     for res in obj.reservations:
         if res.status in STATUTS_BLOQUANTS:
             if _naive(res.date_debut) < date_fin and _naive(res.date_fin) > date_debut:
                 return False
-    for f in fermetures or []:
-        f_debut = _naive(f.date_debut)
-        if f_debut < date_fin and week_end(f_debut) > date_debut:
-            return False
     return True
 
 
@@ -100,45 +190,76 @@ def _get_reservation_active(objet_id: int, session: Session) -> Optional[Reserva
 
 # --- CRUD Objets ---
 
-@router.post("/objets", response_model=Objet)
+@router.post("/objets", response_model=ObjetRead)
 def create_objet(
     objet_in: ObjetCreate,
     session: Session = Depends(get_session),
     admin: User = Depends(get_current_admin)
 ):
-    objet_data = objet_in.dict(exclude={"consommable_ids"})
+    objet_data = objet_in.model_dump(exclude={"consommable_ids", "tag_ids", "tag_id"})
     db_objet = Objet(**objet_data)
     session.add(db_objet)
     session.commit()
     session.refresh(db_objet)
 
-    for c_id in objet_in.consommable_ids:
-        link = ObjetConsommableLink(objet_id=db_objet.id, consommable_id=c_id)
-        session.add(link)
+    tag_ids = objet_in.tag_ids or ([objet_in.tag_id] if objet_in.tag_id else [])
+    _apply_tags(session, db_objet, tag_ids)
+    _apply_consommables(session, db_objet, objet_in.consommable_ids)
 
     session.commit()
     session.refresh(db_objet)
-    return db_objet
+    return objet_to_read(db_objet, is_admin=True)
 
 
-@router.get("/objets", response_model=List[Objet])
+@router.put("/admin/objets/{objet_id}", response_model=ObjetRead)
+def update_objet(
+    objet_id: int,
+    objet_in: ObjetUpdate,
+    session: Session = Depends(get_session),
+    admin: User = Depends(get_current_admin)
+):
+    obj = session.get(Objet, objet_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Objet not found")
+
+    fields = objet_in.model_dump(exclude_unset=True)
+    for key in ("nom", "description", "stockage"):
+        if key in fields:
+            setattr(obj, key, fields[key])
+    session.add(obj)
+
+    if objet_in.tag_ids is not None:
+        _apply_tags(session, obj, objet_in.tag_ids)
+    if objet_in.consommable_ids is not None:
+        _apply_consommables(session, obj, objet_in.consommable_ids)
+
+    session.commit()
+    session.refresh(obj)
+    return objet_to_read(obj, is_admin=True)
+
+
+@router.get("/objets", response_model=List[ObjetRead])
 def list_objets(
     nom: Optional[str] = None,
     tag_id: Optional[int] = None,
     available: bool = Query(False, description="True = uniquement disponibles, False = tous"),
     date_check: Optional[datetime] = None,
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    current_user: Optional[User] = Depends(get_current_user_optional)
 ):
+    is_admin = bool(current_user and current_user.is_admin)
     query = select(Objet)
     if nom:
         query = query.where(Objet.nom.icontains(nom))
     if tag_id:
-        query = query.where(Objet.tag_id == tag_id)
+        # catégorie principale OU l'une des catégories associées
+        tagged_ids = select(ObjetTagLink.objet_id).where(ObjetTagLink.tag_id == tag_id)
+        query = query.where((Objet.tag_id == tag_id) | (Objet.id.in_(tagged_ids)))
 
     objets = session.exec(query).all()
 
     if not available:
-        return objets
+        return [objet_to_read(o, is_admin) for o in objets]
 
     if not date_check:
         date_check = datetime.now()
@@ -147,15 +268,15 @@ def list_objets(
     check_end = check_start + timedelta(days=6)
     check_end = check_end.replace(hour=22, minute=0, second=0, microsecond=0)
 
-    fermetures = session.exec(select(Fermeture)).all()
-
+    # Les congés de l'équipe ne rendent plus les objets indisponibles : la
+    # réservation reste possible et est simplement prolongée (cf. reservations.py).
     return [
-        obj for obj in objets
-        if obj.disponibilite_globale and _is_available_for_week(obj, check_start, check_end, fermetures)
+        objet_to_read(obj, is_admin) for obj in objets
+        if obj.disponibilite_globale and _is_available_for_week(obj, check_start, check_end)
     ]
 
 
-@router.get("/objets/{objet_id}", response_model=Objet)
+@router.get("/objets/{objet_id}", response_model=ObjetRead)
 def get_objet(
     objet_id: int,
     session: Session = Depends(get_session),
@@ -178,7 +299,7 @@ def get_objet(
         session.add(historique_link)
         session.commit()
 
-    return obj
+    return objet_to_read(obj, is_admin=bool(current_user and current_user.is_admin))
 
 
 # --- Admin CRUD ---
@@ -197,9 +318,14 @@ def delete_objet(
     if active:
         raise HTTPException(status_code=400, detail="Impossible de supprimer un objet avec des réservations actives")
 
+    # Nettoie les liens (catégories, consommables, favoris, historique) pour ne pas laisser d'orphelins
+    for link_model in (ObjetTagLink, ObjetConsommableLink, UserObjetFavorisLink, UserObjetHistoriqueLink):
+        for link in session.exec(select(link_model).where(link_model.objet_id == objet_id)).all():
+            session.delete(link)
+    nom = obj.nom
     session.delete(obj)
     session.commit()
-    return {"ok": True, "message": f"Objet '{obj.nom}' supprimé"}
+    return {"ok": True, "message": f"Objet '{nom}' supprimé"}
 
 
 @router.put("/admin/objets/{objet_id}/available")
@@ -264,7 +390,7 @@ async def upload_objet_image(
 
 # --- Alertes (objets en retard) ---
 
-@router.get("/admin/objets/alerts", response_model=List[Objet])
+@router.get("/admin/objets/alerts", response_model=List[ObjetRead])
 def list_objets_en_retard(
     session: Session = Depends(get_session),
     admin: User = Depends(get_current_admin)
@@ -282,19 +408,19 @@ def list_objets_en_retard(
     if not objet_ids:
         return []
 
-    return session.exec(select(Objet).where(Objet.id.in_(objet_ids))).all()
+    return [objet_to_read(o, True) for o in session.exec(select(Objet).where(Objet.id.in_(objet_ids))).all()]
 
 
 # --- Objets en maintenance ---
 
-@router.get("/admin/objets/maintenance", response_model=List[Objet])
+@router.get("/admin/objets/maintenance", response_model=List[ObjetRead])
 def list_objets_en_maintenance(
     session: Session = Depends(get_session),
     admin: User = Depends(get_current_admin)
 ):
     """Objets marqués indisponibles (maintenance) — à rescanner pour les remettre en service."""
     objets = session.exec(select(Objet)).all()
-    return [obj for obj in objets if not obj.disponibilite_globale]
+    return [objet_to_read(obj, True) for obj in objets if not obj.disponibilite_globale]
 
 
 # --- QR Scan : avancement du statut ---
