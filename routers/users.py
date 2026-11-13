@@ -30,9 +30,15 @@ class UserRead(BaseModel):
     is_point_relais: bool
     association_id: Optional[int] = None
     credits: int = 100
+    # Vrai tant que le compte utilise le mot de passe initial (rappel sur l'accueil).
+    has_default_password: bool = False
 
     class Config:
         from_attributes = True
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str
 
 class NotificationRead(BaseModel):
     id: int
@@ -91,9 +97,31 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), ses
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
+DEFAULT_PASSWORD = "123456"
+MIN_PASSWORD_LENGTH = 6
+
 @router.get("/users/me", response_model=UserRead)
 def read_users_me(current_user: User = Depends(get_current_user)):
-    return current_user
+    data = UserRead.model_validate(current_user)
+    data.has_default_password = verify_password(DEFAULT_PASSWORD, current_user.password_hash)
+    return data
+
+@router.put("/users/me/password")
+def change_password(
+    payload: PasswordChange,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    if not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="Mot de passe actuel incorrect")
+    if len(payload.new_password) < MIN_PASSWORD_LENGTH:
+        raise HTTPException(status_code=400, detail=f"Le mot de passe doit contenir au moins {MIN_PASSWORD_LENGTH} caractères")
+    if payload.new_password == DEFAULT_PASSWORD:
+        raise HTTPException(status_code=400, detail="Choisissez un mot de passe différent du mot de passe initial")
+    current_user.password_hash = get_password_hash(payload.new_password)
+    session.add(current_user)
+    session.commit()
+    return {"ok": True}
 
 @router.post("/users/favoris/{objet_id}")
 def add_favori(objet_id: int, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
